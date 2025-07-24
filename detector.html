@@ -34,11 +34,6 @@
                     Heard It! Analyze Last 5s
                 </button>
             </div>
-             <div class="pt-4">
-                 <button id="compassButton" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300">
-                    Enable Compass
-                </button>
-            </div>
         </div>
         
         <!-- Active Targets UI -->
@@ -95,7 +90,6 @@
             // DOM Elements
             const startButton = document.getElementById('startButton');
             const analyzeHistoryButton = document.getElementById('analyzeHistoryButton');
-            const compassButton = document.getElementById('compassButton');
             const clearLogButton = document.getElementById('clearLogButton');
             const compassStatusEl = document.getElementById('compassStatus');
             const logContainer = document.getElementById('logContainer');
@@ -115,10 +109,11 @@
             const trackFreqButton = document.getElementById('trackFreqButton');
 
             // App State
-            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, targetsPtr;
+            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, historyFreqPtr, targetsPtr;
             let animationFrameId;
             let currentHeading = 0;
             let selectedPeakFrequency = 0;
+            let compassInitialized = false;
             const detectionLog = [];
             const historyBuffer = [];
             const HISTORY_SIZE = 250; 
@@ -131,6 +126,7 @@
 
             dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
             liveFreqPtr = wasmModule._malloc(4);
+            historyFreqPtr = wasmModule._malloc(4);
             
             // --- Frequency Management with localStorage ---
             function loadTrackedFrequencies() {
@@ -145,13 +141,11 @@
                     console.error("Could not parse saved frequencies:", e);
                     localStorage.removeItem('trackedFrequencies');
                 }
-                // Combine and ensure no duplicates
                 const allFrequencies = [...new Set([...defaultFrequencies, ...savedFrequencies])];
                 TARGET_FREQUENCIES = new Float32Array(allFrequencies);
             }
 
             function saveTrackedFrequencies() {
-                // Don't save the default frequencies, only user-added ones.
                 const userFrequencies = Array.from(TARGET_FREQUENCIES).filter(f => ![4000, 5000, 12000].includes(f));
                 localStorage.setItem('trackedFrequencies', JSON.stringify(userFrequencies));
             }
@@ -197,8 +191,6 @@
             analyzeHistoryButton.addEventListener('click', showAnalysisModal);
             closeModalButton.addEventListener('click', () => analysisModal.style.display = 'none');
             analysisModal.querySelector('.modal-backdrop').addEventListener('click', () => analysisModal.style.display = 'none');
-
-            compassButton.addEventListener('click', requestOrientationPermission);
             
             clearLogButton.addEventListener('click', () => {
                 detectionLog.length = 0;
@@ -207,6 +199,9 @@
             });
 
             async function startDetection() {
+                if (!compassInitialized) {
+                    await requestOrientationPermission();
+                }
                 if (!wasmModule) return;
                 if (!audioContext) await setupAudio();
                 if (audioContext.state === 'suspended') await audioContext.resume();
@@ -239,13 +234,122 @@
                 } catch (err) { console.error("Mic Error:", err); }
             }
 
-            function requestOrientationPermission() { /* ... unchanged ... */ }
-            function handleOrientation(event) { /* ... unchanged ... */ }
-            function recordAndDetect() { /* ... unchanged ... */ }
-            function showAnalysisModal() { /* ... unchanged ... */ }
-            function drawSpectrogram() { /* ... unchanged ... */ }
-            spectrogramCanvas.addEventListener('click', (event) => { /* ... unchanged ... */ });
-            playToneButton.addEventListener('click', () => { /* ... unchanged ... */ });
+            function requestOrientationPermission() {
+                return new Promise(resolve => {
+                    compassStatusEl.textContent = 'Initializing compass...';
+                    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        DeviceOrientationEvent.requestPermission()
+                            .then(permissionState => {
+                                if (permissionState === 'granted') {
+                                    window.addEventListener('deviceorientation', handleOrientation);
+                                    compassInitialized = true;
+                                } else {
+                                    compassStatusEl.textContent = 'Compass permission denied.';
+                                }
+                                resolve();
+                            })
+                            .catch(err => {
+                                console.error("Compass permission error:", err);
+                                compassStatusEl.textContent = 'Compass not available.';
+                                resolve();
+                            });
+                    } else if ('ondeviceorientation' in window || 'ondeviceorientationabsolute' in window) {
+                        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+                        window.addEventListener('deviceorientation', handleOrientation, true);
+                        compassInitialized = true;
+                        resolve();
+                    } else {
+                        compassStatusEl.textContent = 'Compass not supported on this device.';
+                        resolve();
+                    }
+                });
+            }
+
+            function handleOrientation(event) {
+                let heading = event.webkitCompassHeading || event.alpha;
+                if(heading !== null && heading !== undefined) {
+                    currentHeading = heading;
+                    compassStatusEl.textContent = `Pointing: ${Math.round(currentHeading)}°`;
+                }
+            }
+
+            function recordAndDetect() {
+                if (!analyser || !wasmModule) return;
+                animationFrameId = requestAnimationFrame(recordAndDetect);
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                historyBuffer.push(new Uint8Array(dataArray));
+                if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
+                wasmModule.HEAPU8.set(dataArray, dataPtr);
+                const detectedAmplitude = wasmModule._detector_find_multiple_peaks(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetsPtr, TARGET_FREQUENCIES.length, SENSITIVITY, liveFreqPtr);
+                if (detectedAmplitude > 0) {
+                    const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
+                    if ('vibrate' in navigator) navigator.vibrate(100);
+                    detectionLog.unshift({ time: new Date(), freq: detectedFreq, amp: detectedAmplitude, heading: currentHeading });
+                    if (detectionLog.length > 50) detectionLog.pop();
+                    updateLogUI();
+                    drawRadar();
+                }
+            }
+
+            function showAnalysisModal() {
+                 analysisModal.style.display = 'flex';
+                drawSpectrogram();
+                peakInfo.style.display = 'none';
+            }
+
+            function drawSpectrogram() {
+                const canvas = spectrogramCanvas;
+                const ctx = spectrogramCtx;
+                const width = 512;
+                const height = 256;
+                canvas.width = width;
+                canvas.height = height;
+
+                if (historyBuffer.length === 0) return;
+
+                const step = width / historyBuffer.length;
+                const maxFreq = audioContext.sampleRate / 2;
+
+                for (let i = 0; i < historyBuffer.length; i++) {
+                    const dataArray = historyBuffer[i];
+                    for (let j = 0; j < dataArray.length; j++) {
+                        const value = dataArray[j];
+                        if (value > 100) { // Only draw strong signals
+                            const percent = j / dataArray.length;
+                            const y = height - (percent * height);
+                            const hue = 240 - (value / 255) * 240; // Blue to red
+                            ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.5)`;
+                            ctx.fillRect(i * step, y, step, 1);
+                        }
+                    }
+                }
+            }
+            
+            spectrogramCanvas.addEventListener('click', (event) => {
+                const rect = spectrogramCanvas.getBoundingClientRect();
+                const y = event.clientY - rect.top;
+                const freqPercent = 1 - (y / rect.height);
+                const maxFreq = audioContext.sampleRate / 2;
+                selectedPeakFrequency = freqPercent * maxFreq;
+
+                peakFreqEl.textContent = `${(selectedPeakFrequency / 1000).toFixed(2)} kHz (${Math.round(selectedPeakFrequency)} Hz)`;
+                peakInfo.style.display = 'block';
+            });
+            
+            playToneButton.addEventListener('click', () => {
+                if (!audioContext || selectedPeakFrequency <= 0) return;
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(selectedPeakFrequency, audioContext.currentTime);
+                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + 0.5);
+            });
 
             trackFreqButton.addEventListener('click', () => {
                 const freqToAdd = Math.round(selectedPeakFrequency);
