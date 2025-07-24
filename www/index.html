@@ -2,287 +2,282 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Frequency Beep Detector</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Directional Beep Detector</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .preset-btn { 
-            @apply w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-2 px-4 rounded-lg transition-all duration-200 opacity-60 flex items-center justify-center; 
-        }
-        .preset-btn.active { 
-            @apply bg-blue-500 text-white font-bold ring-2 ring-offset-2 ring-offset-gray-800 ring-blue-500 opacity-100; 
-        }
+        body { font-family: 'Inter', sans-serif; touch-action: manipulation; }
+        .amp-bar-container { background-color: #374151; }
+        .amp-bar { background: linear-gradient(90deg, #10B981 0%, #F59E0B 70%, #EF4444 100%); transition: width 0.3s ease-in-out; }
+        #radarCanvas { background-color: #1f2937; }
     </style>
 </head>
 <body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
 
     <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
         <div class="text-center">
-            <h1 class="text-3xl font-bold text-blue-400">Annoying Device Detector</h1>
-            <p class="text-gray-400 mt-2">With real-time and 5-second look-back analysis.</p>
+            <h1 class="text-3xl font-bold text-blue-400">Directional Detector</h1>
+            <p class="text-gray-400 mt-2">Using compass and loudness to find the source.</p>
         </div>
 
         <!-- Controls -->
         <div class="space-y-4 p-4 bg-gray-900/50 rounded-lg">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 <button id="startButton" disabled class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 disabled:bg-gray-600">
-                    Loading WASM...
+                 <button id="startButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300">
+                    Start Detection
                 </button>
-                 <button id="analyzeHistoryButton" disabled class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed">
-                    Heard It! Analyze Last 5s
+                 <button id="compassButton" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300">
+                    Enable Compass
                 </button>
-            </div>
-            <div class="pt-4">
-                <p class="text-center text-sm font-medium text-gray-300 mb-2">Live Detection Profiles</p>
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    <button id="preset-beep" class="preset-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="check-icon hidden mr-2" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
-                        <span>Beep (4kHz)</span>
-                    </button>
-                    <button id="preset-cricket" class="preset-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="check-icon hidden mr-2" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
-                        <span>Cricket (5kHz)</span>
-                    </button>
-                    <button id="preset-screech" class="preset-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="check-icon hidden mr-2" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
-                        <span>Screech (12kHz)</span>
-                    </button>
-                </div>
-            </div>
-            <!-- New Sensitivity Slider -->
-            <div class="pt-4">
-                <label for="sensitivity" class="block text-sm font-medium text-gray-300 mb-1">Look-back Sensitivity (Lower is more sensitive)</label>
-                <div class="flex items-center gap-4">
-                    <input type="range" id="sensitivity" min="100" max="250" value="170" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
-                    <span id="sensitivityValue" class="text-sm font-semibold text-blue-300 w-12 text-center">170</span>
-                </div>
             </div>
         </div>
 
-        <!-- Status & Visualization -->
-        <div class="space-y-4">
-            <div id="status" class="text-center text-lg font-medium p-3 rounded-lg bg-gray-700 transition-colors duration-300">
-                Press "Start" to begin.
+        <!-- Direction Finder -->
+        <div class="space-y-3">
+            <h2 class="text-xl font-bold text-gray-300 text-center">Direction Finder</h2>
+            <div class="w-full aspect-square rounded-full mx-auto max-w-xs shadow-lg">
+                <canvas id="radarCanvas"></canvas>
             </div>
-             <div id="historyStatus" class="text-center text-md font-medium p-2 rounded-lg bg-gray-700/50 transition-colors duration-300 text-gray-300">
-                Look-back analysis results will appear here.
+             <div id="compassStatus" class="text-center text-sm text-gray-400">Compass inactive.</div>
+        </div>
+
+        <!-- Detection Log -->
+        <div class="space-y-3">
+            <div class="flex justify-between items-center">
+                 <h2 class="text-xl font-bold text-gray-300">Detection Log</h2>
+                 <button id="clearLogButton" class="text-sm text-gray-400 hover:text-white">Clear</button>
             </div>
-            <div class="w-full h-64 bg-gray-900/50 rounded-lg p-2 overflow-hidden">
-                <canvas id="visualizer"></canvas>
+            <div id="logContainer" class="w-full h-40 bg-gray-900/50 rounded-lg p-3 space-y-2 overflow-y-auto">
+                <p id="logPlaceholder" class="text-gray-500 text-center pt-4">Waiting for detections...</p>
             </div>
         </div>
     </div>
 
-    <script>
-        var Module = {
-            wasmBinaryFile: 'detector.wasm',
-            onRuntimeInitialized: function() {
-                const wasmModule = Module;
+    <script type="module">
+        import createModule from './detector.js';
 
-                // DOM Elements
-                const startButton = document.getElementById('startButton');
-                const analyzeHistoryButton = document.getElementById('analyzeHistoryButton');
-                const statusEl = document.getElementById('status');
-                const historyStatusEl = document.getElementById('historyStatus');
-                const canvas = document.getElementById('visualizer');
-                const sensitivitySlider = document.getElementById('sensitivity');
-                const sensitivityValue = document.getElementById('sensitivityValue');
-                
-                const presetBeepBtn = document.getElementById('preset-beep');
-                const presetCricketBtn = document.getElementById('preset-cricket');
-                const presetScreechBtn = document.getElementById('preset-screech');
-                const presetButtons = [presetBeepBtn, presetCricketBtn, presetScreechBtn];
+        // DOM Elements
+        const startButton = document.getElementById('startButton');
+        const compassButton = document.getElementById('compassButton');
+        const clearLogButton = document.getElementById('clearLogButton');
+        const statusEl = document.getElementById('status'); // Re-add if needed
+        const compassStatusEl = document.getElementById('compassStatus');
+        const logContainer = document.getElementById('logContainer');
+        const logPlaceholder = document.getElementById('logPlaceholder');
+        const radarCanvas = document.getElementById('radarCanvas');
+        const radarCtx = radarCanvas.getContext('2d');
 
-                const canvasCtx = canvas.getContext('2d');
-                let audioContext, analyser, detectorPtr, dataPtr, freqPtr;
-                let animationFrameId;
+        // App State
+        let audioContext, analyser, wasmModule, detectorPtr, dataPtr, liveFreqPtr;
+        let animationFrameId;
+        let currentHeading = 0;
+        const detectionLog = [];
+        const TARGET_FREQUENCIES = new Float32Array([4000.0, 5000.0, 12000.0]);
+        const SENSITIVITY = 200;
 
-                const historyBuffer = [];
-                const HISTORY_SIZE = 250;
+        // --- WASM Setup ---
+        createModule().then(Module => {
+            wasmModule = Module;
+            detectorPtr = wasmModule._detector_new();
+            const bufferSize = 2048;
+            dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
+            liveFreqPtr = wasmModule._malloc(4);
+            console.log("WASM module loaded.");
+        });
 
-                detectorPtr = wasmModule._detector_new();
-                const bufferSize = 2048;
-                dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
-                freqPtr = wasmModule._malloc(4);
-                console.log("WASM module loaded and memory allocated.");
-                
-                startButton.disabled = false;
-                startButton.textContent = 'Start Detection';
-                statusEl.textContent = 'Ready. Press "Start" to begin.';
+        // --- Control Logic ---
+        startButton.addEventListener('click', async () => {
+            if (startButton.dataset.running === 'true') stopDetection();
+            else await startDetection();
+        });
 
-                // --- UI Logic ---
-                sensitivitySlider.addEventListener('input', () => {
-                    sensitivityValue.textContent = sensitivitySlider.value;
-                });
+        compassButton.addEventListener('click', requestOrientationPermission);
+        
+        clearLogButton.addEventListener('click', () => {
+            detectionLog.length = 0;
+            updateLogUI();
+            drawRadar();
+        });
 
-                const setActiveButton = (activeBtn) => {
-                    presetButtons.forEach(btn => {
-                        btn.classList.remove('active');
-                        btn.querySelector('.check-icon').classList.add('hidden');
-                    });
-                    if (activeBtn) {
-                        activeBtn.classList.add('active');
-                        activeBtn.querySelector('.check-icon').classList.remove('hidden');
-                    }
-                };
-                presetBeepBtn.addEventListener('click', () => setActiveButton(presetBeepBtn));
-                presetCricketBtn.addEventListener('click', () => setActiveButton(presetCricketBtn));
-                presetScreechBtn.addEventListener('click', () => setActiveButton(presetScreechBtn));
+        async function startDetection() {
+            if (!wasmModule) return;
+            if (!audioContext) await setupAudio();
+            if (audioContext.state === 'suspended') await audioContext.resume();
+            startButton.dataset.running = 'true';
+            startButton.textContent = "Stop Detection";
+            startButton.classList.replace('bg-blue-600', 'bg-red-600');
+            recordAndDetect();
+        }
 
-                // --- Main Control Logic ---
-                startButton.addEventListener('click', async () => {
-                    if (startButton.dataset.running === 'true') {
-                        stopDetection();
-                    } else {
-                        await startDetection();
-                    }
-                });
+        function stopDetection() {
+            cancelAnimationFrame(animationFrameId);
+            if (audioContext) audioContext.suspend();
+            startButton.dataset.running = 'false';
+            startButton.textContent = "Start Detection";
+            startButton.classList.replace('bg-red-600', 'bg-blue-600');
+        }
 
-                async function startDetection() {
-                    if (!audioContext) await setupAudio();
-                    if (audioContext.state === 'suspended') await audioContext.resume();
+        async function setupAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.1;
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+            } catch (err) { console.error("Mic Error:", err); }
+        }
 
-                    startButton.dataset.running = 'true';
-                    startButton.textContent = "Stop Detection";
-                    startButton.classList.replace('bg-blue-600', 'bg-red-600');
-                    startButton.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
-                    
-                    analyzeHistoryButton.disabled = false;
-                    statusEl.textContent = "Listening...";
-                    statusEl.classList.add('bg-green-600');
-                    historyStatusEl.textContent = "Look-back analysis is ready.";
-                    historyStatusEl.classList.remove('bg-teal-500');
-                    
-                    recordAndDetect();
-                }
-
-                function stopDetection() {
-                    cancelAnimationFrame(animationFrameId);
-                    if (audioContext) audioContext.suspend();
-                    startButton.dataset.running = 'false';
-                    startButton.textContent = "Start Detection";
-                    startButton.classList.replace('bg-red-600', 'bg-blue-600');
-                    startButton.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
-                    analyzeHistoryButton.disabled = true;
-                    statusEl.textContent = "Detection stopped.";
-                    statusEl.classList.remove('bg-green-600', 'bg-red-500');
-                }
-
-                async function setupAudio() {
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                        analyser = audioContext.createAnalyser();
-                        analyser.fftSize = 2048;
-                        analyser.smoothingTimeConstant = 0.1;
-                        analyser.minDecibels = -90;
-                        analyser.maxDecibels = -10;
-                        const source = audioContext.createMediaStreamSource(stream);
-                        source.connect(analyser);
-                    } catch (err) {
-                        console.error("Error accessing microphone:", err);
-                        statusEl.textContent = "Error: Could not access microphone.";
-                    }
-                }
-
-                function recordAndDetect() {
-                    if (!analyser || !wasmModule) return;
-
-                    const bufferLength = analyser.frequencyBinCount;
-                    const dataArray = new Uint8Array(bufferLength);
-                    analyser.getByteFrequencyData(dataArray);
-
-                    historyBuffer.push(new Uint8Array(dataArray));
-                    if (historyBuffer.length > HISTORY_SIZE) {
-                        historyBuffer.shift();
-                    }
-
-                    const activePreset = document.querySelector('.preset-btn.active');
-                    let targetFrequency = 4000;
-                    if(activePreset) {
-                        const freqText = activePreset.textContent.match(/(\d+)kHz/);
-                        if(freqText) targetFrequency = parseInt(freqText[1]) * 1000;
-                    }
-
-                    wasmModule.HEAPU8.set(dataArray, dataPtr);
-                    const peakFrequency = wasmModule._detector_find_peak(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetFrequency, 210);
-                    
-                    drawVisualizer(dataArray, bufferLength, peakFrequency > 0 ? targetFrequency : -1, audioContext.sampleRate);
-
-                    if (peakFrequency > 0) {
-                        statusEl.textContent = `Live peak detected near ${ (targetFrequency/1000).toFixed(1) } kHz!`;
-                        statusEl.classList.add('bg-red-500');
-                        if ('vibrate' in navigator) navigator.vibrate(100);
-                    } else {
-                        if(statusEl.classList.contains('bg-red-500')) {
-                           statusEl.textContent = "Listening...";
-                           statusEl.classList.remove('bg-red-500');
+        // --- Compass / Device Orientation ---
+        function requestOrientationPermission() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                            compassButton.disabled = true;
+                            compassButton.textContent = "Compass Enabled";
                         }
-                    }
-                    
-                    animationFrameId = requestAnimationFrame(recordAndDetect);
-                }
-
-                analyzeHistoryButton.addEventListener('click', () => {
-                    if (historyBuffer.length === 0) {
-                        historyStatusEl.textContent = "Buffer is empty. Wait a few seconds.";
-                        return;
-                    }
-                    historyStatusEl.textContent = "Analyzing last 5 seconds...";
-
-                    let bestOverallAmplitude = 0;
-                    let bestOverallFrequency = 0;
-                    const bufferLength = analyser.frequencyBinCount;
-                    const sensitivity = parseInt(sensitivitySlider.value, 10); // Get sensitivity from slider
-
-                    for (const historicData of historyBuffer) {
-                        wasmModule.HEAPU8.set(historicData, dataPtr);
-                        // Pass sensitivity to the WASM function
-                        const currentAmplitude = wasmModule._find_strongest_peak(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, freqPtr, sensitivity);
-                        
-                        if (currentAmplitude > bestOverallAmplitude) {
-                            bestOverallAmplitude = currentAmplitude;
-                            bestOverallFrequency = wasmModule.getValue(freqPtr, 'float');
-                        }
-                    }
-
-                    if (bestOverallFrequency > 0) {
-                        const freqKHz = (bestOverallFrequency / 1000).toFixed(2);
-                        historyStatusEl.textContent = `Found peak in history: ${freqKHz} kHz!`;
-                        historyStatusEl.classList.add('bg-teal-500');
-                        if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-                    } else {
-                        historyStatusEl.textContent = "No significant peak found. Try lowering sensitivity.";
-                        historyStatusEl.classList.remove('bg-teal-500');
-                    }
-                });
-
-                function drawVisualizer(dataArray, bufferLength, detectedFreq, sampleRate) {
-                    if(!canvas.isConnected) return;
-                    canvas.width = canvas.clientWidth;
-                    canvas.height = canvas.clientHeight;
-                    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-                    const barWidth = (canvas.width / bufferLength) * 2.5;
-                    let x = 0;
-                    const detectedBin = Math.round(detectedFreq * bufferLength / (sampleRate / 2));
-
-                    for (let i = 0; i < bufferLength; i++) {
-                        const barHeight = dataArray[i] * (canvas.height / 255);
-                        canvasCtx.fillStyle = (i >= detectedBin - 2 && i <= detectedBin + 2 && detectedFreq > 0) ? '#ef4444' : '#3b82f6';
-                        canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-                        x += barWidth + 1;
-                    }
-                }
-                
-                setActiveButton(presetBeepBtn); // Set initial state
+                    })
+                    .catch(console.error);
+            } else {
+                // Handle non-iOS 13+ devices
+                window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+                window.addEventListener('deviceorientation', handleOrientation, true);
+                compassButton.disabled = true;
+                compassButton.textContent = "Compass Enabled";
             }
-        };
+        }
+
+        function handleOrientation(event) {
+            let heading = event.webkitCompassHeading || event.alpha;
+            if(heading !== null) {
+                currentHeading = heading;
+                compassStatusEl.textContent = `Pointing: ${Math.round(currentHeading)}°`;
+            }
+        }
+
+        // --- Main Detection Loop ---
+        function recordAndDetect() {
+            if (!analyser || !wasmModule) return;
+            animationFrameId = requestAnimationFrame(recordAndDetect);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+
+            const targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
+            wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
+            wasmModule.HEAPU8.set(dataArray, dataPtr);
+
+            const detectedAmplitude = wasmModule._detector_find_multiple_peaks(
+                detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, 
+                targetsPtr, TARGET_FREQUENCIES.length, SENSITIVITY, liveFreqPtr
+            );
+            
+            wasmModule._free(targetsPtr);
+
+            if (detectedAmplitude > 0) {
+                const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
+                if ('vibrate' in navigator) navigator.vibrate(100);
+                
+                detectionLog.unshift({
+                    time: new Date(),
+                    freq: detectedFreq,
+                    amp: detectedAmplitude,
+                    heading: currentHeading
+                });
+                if (detectionLog.length > 50) detectionLog.pop(); // Keep log from getting too big
+                updateLogUI();
+                drawRadar();
+            }
+        }
+        
+        // --- UI Update Functions ---
+        function updateLogUI() {
+            logContainer.innerHTML = '';
+            if (detectionLog.length === 0) {
+                logContainer.innerHTML = `<p id="logPlaceholder" class="text-gray-500 text-center pt-4">Waiting for detections...</p>`;
+                return;
+            }
+            detectionLog.forEach(entry => {
+                const logEntry = document.createElement('div');
+                logEntry.className = 'bg-gray-700/50 p-2 rounded-md text-sm animate-pulse-once';
+                const ampPercent = Math.max(0, Math.min(100, ((entry.amp - SENSITIVITY) / (255 - SENSITIVITY)) * 100));
+                logEntry.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="font-mono text-xs text-gray-400">${entry.time.toLocaleTimeString()}</span>
+                        <span class="font-bold text-blue-300">${(entry.freq / 1000).toFixed(1)} kHz</span>
+                        <span class="text-gray-300">Loudness: ${entry.amp}</span>
+                        <span class="text-purple-300">${Math.round(entry.heading)}°</span>
+                    </div>
+                    <div class="w-full amp-bar-container rounded-full h-2 mt-1">
+                        <div class="amp-bar h-2 rounded-full" style="width: ${ampPercent}%;"></div>
+                    </div>
+                `;
+                logContainer.appendChild(logEntry);
+            });
+        }
+
+        function drawRadar() {
+            const size = radarCanvas.getBoundingClientRect().width;
+            radarCanvas.width = size;
+            radarCanvas.height = size;
+            const center = size / 2;
+            const radius = center * 0.9;
+            
+            radarCtx.clearRect(0, 0, size, size);
+
+            // Draw grid
+            radarCtx.strokeStyle = 'rgba(75, 85, 99, 0.5)';
+            radarCtx.fillStyle = 'rgba(156, 163, 175, 0.7)';
+            radarCtx.font = `${center * 0.08}px Inter`;
+            radarCtx.textAlign = 'center';
+            radarCtx.textBaseline = 'middle';
+
+            ['N', 'E', 'S', 'W'].forEach((dir, i) => {
+                const angle = i * Math.PI / 2 - Math.PI / 2;
+                const x = center + (radius * 1.05) * Math.cos(angle);
+                const y = center + (radius * 1.05) * Math.sin(angle);
+                radarCtx.fillText(dir, x, y);
+            });
+            
+            radarCtx.beginPath();
+            radarCtx.arc(center, center, radius * 0.8, 0, 2 * Math.PI);
+            radarCtx.stroke();
+            radarCtx.beginPath();
+            radarCtx.arc(center, center, radius * 0.4, 0, 2 * Math.PI);
+            radarCtx.stroke();
+
+            // Draw detection points
+            detectionLog.forEach((entry, index) => {
+                const angle = (entry.heading - 90) * Math.PI / 180; // Convert to radians and offset
+                const loudnessRatio = Math.max(0, Math.min(1, (entry.amp - SENSITIVITY) / (255 - SENSITIVITY)));
+                const distanceFromCenter = loudnessRatio * radius;
+                
+                const x = center + distanceFromCenter * Math.cos(angle);
+                const y = center + distanceFromCenter * Math.sin(angle);
+                
+                const pointRadius = 2 + loudnessRatio * 4;
+                const opacity = 1 - (index / detectionLog.length); // Fade older points
+                
+                radarCtx.beginPath();
+                // Color based on loudness
+                const hue = 120 - (loudnessRatio * 120); // Green (120) to Red (0)
+                radarCtx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
+                radarCtx.arc(x, y, pointRadius, 0, 2 * Math.PI);
+                radarCtx.fill();
+            });
+        }
+
+        // Initial Draw
+        window.addEventListener('resize', drawRadar);
+        drawRadar();
     </script>
-    <script src="./detector.js"></script>
 </body>
 </html>
 

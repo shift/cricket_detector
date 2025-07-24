@@ -37,8 +37,8 @@
             echo "Creating output directory ./www..."
             mkdir -p www
             echo "Compiling C++ to WASM..."
-            # Corrected emcc command: Added "HEAPU8" to EXPORTED_RUNTIME_METHODS
-            emcc detector.cpp -o www/detector.js -s EXPORTED_RUNTIME_METHODS='["cwrap", "ccall", "getValue", "HEAPU8"]' -s EXPORTED_FUNCTIONS='["_detector_new", "_detector_free", "_detector_find_peak", "_find_strongest_peak", "_malloc", "_free"]'
+            # Corrected emcc command: Replaced _detector_find_peak with _detector_find_multiple_peaks
+            emcc detector.cpp -o www/detector.js -s EXPORTED_RUNTIME_METHODS='["cwrap", "ccall", "getValue", "HEAPU8"]' -s EXPORTED_FUNCTIONS='["_detector_new", "_detector_free", "_detector_find_multiple_peaks", "_find_strongest_peak", "_malloc", "_free"]'
             if [ $? -ne 0 ]; then
                 echo "emcc compilation failed."
                 return 1
@@ -74,15 +74,14 @@ with open("www/index.html", "r") as f:
     html_content = f.read()
 
 # Extract the main script content (the part inside Module.onRuntimeInitialized)
-match = re.search(r'onRuntimeInitialized:\s*function\(\)\s*\{([\s\S]*?)\s*\}\s*};', html_content, re.DOTALL)
+match = re.search(r'createModule\(\{[\s\S]*?\}\)\.then\(Module => \{([\s\S]*?)\}\);', html_content, re.DOTALL)
 if not match:
-    print('\nError: Could not find Module.onRuntimeInitialized in the HTML file.')
+    print('\nError: Could not find the main script block in the HTML file.')
     exit(1)
 app_js = match.group(1)
 
-# Clean up the original HTML by removing the script tags we are replacing.
-final_html = re.sub(r'<script>[\s\S]*?</script>', "", html_content)
-final_html = re.sub(r'<script src="./detector.js"></script>', "", final_html)
+# Clean up the original HTML by removing the script tag we are replacing.
+final_html = re.sub(r'<script type="module">[\s\S]*?</script>', "", html_content)
 
 
 # Construct the new, self-contained script block
@@ -104,9 +103,12 @@ var Module = {{
         return bytes;
     }})(),
     onRuntimeInitialized: function() {{
-        {app_js}
+        // The main app logic is now inside the .then() block
     }}
 }};
+
+// The original .then() block from the module script
+createModule(Module).then(Module => {{{app_js}}});
 </script>"""
 
 # Add the new script block to the end of the body

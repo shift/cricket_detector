@@ -1643,7 +1643,7 @@ function checkIncomingModuleAPI() {
 // Imports from the Wasm binary.
 var _detector_new = Module['_detector_new'] = makeInvalidEarlyAccess('_detector_new');
 var _detector_free = Module['_detector_free'] = makeInvalidEarlyAccess('_detector_free');
-var _detector_find_peak = Module['_detector_find_peak'] = makeInvalidEarlyAccess('_detector_find_peak');
+var _detector_find_multiple_peaks = Module['_detector_find_multiple_peaks'] = makeInvalidEarlyAccess('_detector_find_multiple_peaks');
 var _find_strongest_peak = Module['_find_strongest_peak'] = makeInvalidEarlyAccess('_find_strongest_peak');
 var _fflush = makeInvalidEarlyAccess('_fflush');
 var _strerror = makeInvalidEarlyAccess('_strerror');
@@ -1660,8 +1660,8 @@ var _emscripten_stack_get_current = makeInvalidEarlyAccess('_emscripten_stack_ge
 function assignWasmExports(wasmExports) {
   Module['_detector_new'] = _detector_new = createExportWrapper('detector_new', 0);
   Module['_detector_free'] = _detector_free = createExportWrapper('detector_free', 1);
-  Module['_detector_find_peak'] = _detector_find_peak = createExportWrapper('detector_find_peak', 6);
-  Module['_find_strongest_peak'] = _find_strongest_peak = createExportWrapper('find_strongest_peak', 6);
+  Module['_detector_find_multiple_peaks'] = _detector_find_multiple_peaks = createExportWrapper('detector_find_multiple_peaks', 8);
+  Module['_find_strongest_peak'] = _find_strongest_peak = createExportWrapper('find_strongest_peak', 5);
   _fflush = createExportWrapper('fflush', 1);
   _strerror = createExportWrapper('strerror', 1);
   Module['_malloc'] = _malloc = createExportWrapper('malloc', 1);
