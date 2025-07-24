@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Frequency Beep Detector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .preset-btn { 
+            @apply w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-2 px-4 rounded-lg transition-all duration-200 opacity-60 flex items-center justify-center; 
+        }
+        .preset-btn.active { 
+            @apply bg-blue-500 text-white font-bold ring-2 ring-offset-2 ring-offset-gray-800 ring-blue-500 opacity-100; 
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
+        <div class="text-center">
+            <h1 class="text-3xl font-bold text-blue-400">Annoying Device Detector</h1>
+            <p class="text-gray-400 mt-2">With real-time and 5-second look-back analysis.</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="space-y-4 p-4 bg-gray-900/50 rounded-lg">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <button id="startButton" disabled class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 disabled:bg-gray-600">
+                    Loading WASM...
+                </button>
+                 <button id="analyzeHistoryButton" disabled class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed">
+                    Heard It! Analyze Last 5s
+                </button>
+            </div>
+            <div class="pt-4">
+                <p class="text-center text-sm font-medium text-gray-300 mb-2">Live Detection Profiles</p>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <button id="preset-beep" class="preset-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="check-icon hidden mr-2" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
+                        <span>Beep (4kHz)</span>
+                    </button>
+                    <button id="preset-cricket" class="preset-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="check-icon hidden mr-2" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
+                        <span>Cricket (5kHz)</span>
+                    </button>
+                    <button id="preset-screech" class="preset-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="check-icon hidden mr-2" viewBox="0 0 16 16"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/></svg>
+                        <span>Screech (12kHz)</span>
+                    </button>
+                </div>
+            </div>
+            <!-- New Sensitivity Slider -->
+            <div class="pt-4">
+                <label for="sensitivity" class="block text-sm font-medium text-gray-300 mb-1">Look-back Sensitivity (Lower is more sensitive)</label>
+                <div class="flex items-center gap-4">
+                    <input type="range" id="sensitivity" min="100" max="250" value="170" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    <span id="sensitivityValue" class="text-sm font-semibold text-blue-300 w-12 text-center">170</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status & Visualization -->
+        <div class="space-y-4">
+            <div id="status" class="text-center text-lg font-medium p-3 rounded-lg bg-gray-700 transition-colors duration-300">
+                Press "Start" to begin.
+            </div>
+             <div id="historyStatus" class="text-center text-md font-medium p-2 rounded-lg bg-gray-700/50 transition-colors duration-300 text-gray-300">
+                Look-back analysis results will appear here.
+            </div>
+            <div class="w-full h-64 bg-gray-900/50 rounded-lg p-2 overflow-hidden">
+                <canvas id="visualizer"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var Module = {
+            wasmBinaryFile: 'detector.wasm',
+            onRuntimeInitialized: function() {
+                const wasmModule = Module;
+
+                // DOM Elements
+                const startButton = document.getElementById('startButton');
+                const analyzeHistoryButton = document.getElementById('analyzeHistoryButton');
+                const statusEl = document.getElementById('status');
+                const historyStatusEl = document.getElementById('historyStatus');
+                const canvas = document.getElementById('visualizer');
+                const sensitivitySlider = document.getElementById('sensitivity');
+                const sensitivityValue = document.getElementById('sensitivityValue');
+                
+                const presetBeepBtn = document.getElementById('preset-beep');
+                const presetCricketBtn = document.getElementById('preset-cricket');
+                const presetScreechBtn = document.getElementById('preset-screech');
+                const presetButtons = [presetBeepBtn, presetCricketBtn, presetScreechBtn];
+
+                const canvasCtx = canvas.getContext('2d');
+                let audioContext, analyser, detectorPtr, dataPtr, freqPtr;
+                let animationFrameId;
+
+                const historyBuffer = [];
+                const HISTORY_SIZE = 250;
+
+                detectorPtr = wasmModule._detector_new();
+                const bufferSize = 2048;
+                dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
+                freqPtr = wasmModule._malloc(4);
+                console.log("WASM module loaded and memory allocated.");
+                
+                startButton.disabled = false;
+                startButton.textContent = 'Start Detection';
+                statusEl.textContent = 'Ready. Press "Start" to begin.';
+
+                // --- UI Logic ---
+                sensitivitySlider.addEventListener('input', () => {
+                    sensitivityValue.textContent = sensitivitySlider.value;
+                });
+
+                const setActiveButton = (activeBtn) => {
+                    presetButtons.forEach(btn => {
+                        btn.classList.remove('active');
+                        btn.querySelector('.check-icon').classList.add('hidden');
+                    });
+                    if (activeBtn) {
+                        activeBtn.classList.add('active');
+                        activeBtn.querySelector('.check-icon').classList.remove('hidden');
+                    }
+                };
+                presetBeepBtn.addEventListener('click', () => setActiveButton(presetBeepBtn));
+                presetCricketBtn.addEventListener('click', () => setActiveButton(presetCricketBtn));
+                presetScreechBtn.addEventListener('click', () => setActiveButton(presetScreechBtn));
+
+                // --- Main Control Logic ---
+                startButton.addEventListener('click', async () => {
+                    if (startButton.dataset.running === 'true') {
+                        stopDetection();
+                    } else {
+                        await startDetection();
+                    }
+                });
+
+                async function startDetection() {
+                    if (!audioContext) await setupAudio();
+                    if (audioContext.state === 'suspended') await audioContext.resume();
+
+                    startButton.dataset.running = 'true';
+                    startButton.textContent = "Stop Detection";
+                    startButton.classList.replace('bg-blue-600', 'bg-red-600');
+                    startButton.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+                    
+                    analyzeHistoryButton.disabled = false;
+                    statusEl.textContent = "Listening...";
+                    statusEl.classList.add('bg-green-600');
+                    historyStatusEl.textContent = "Look-back analysis is ready.";
+                    historyStatusEl.classList.remove('bg-teal-500');
+                    
+                    recordAndDetect();
+                }
+
+                function stopDetection() {
+                    cancelAnimationFrame(animationFrameId);
+                    if (audioContext) audioContext.suspend();
+                    startButton.dataset.running = 'false';
+                    startButton.textContent = "Start Detection";
+                    startButton.classList.replace('bg-red-600', 'bg-blue-600');
+                    startButton.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+                    analyzeHistoryButton.disabled = true;
+                    statusEl.textContent = "Detection stopped.";
+                    statusEl.classList.remove('bg-green-600', 'bg-red-500');
+                }
+
+                async function setupAudio() {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        analyser = audioContext.createAnalyser();
+                        analyser.fftSize = 2048;
+                        analyser.smoothingTimeConstant = 0.1;
+                        analyser.minDecibels = -90;
+                        analyser.maxDecibels = -10;
+                        const source = audioContext.createMediaStreamSource(stream);
+                        source.connect(analyser);
+                    } catch (err) {
+                        console.error("Error accessing microphone:", err);
+                        statusEl.textContent = "Error: Could not access microphone.";
+                    }
+                }
+
+                function recordAndDetect() {
+                    if (!analyser || !wasmModule) return;
+
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    analyser.getByteFrequencyData(dataArray);
+
+                    historyBuffer.push(new Uint8Array(dataArray));
+                    if (historyBuffer.length > HISTORY_SIZE) {
+                        historyBuffer.shift();
+                    }
+
+                    const activePreset = document.querySelector('.preset-btn.active');
+                    let targetFrequency = 4000;
+                    if(activePreset) {
+                        const freqText = activePreset.textContent.match(/(\d+)kHz/);
+                        if(freqText) targetFrequency = parseInt(freqText[1]) * 1000;
+                    }
+
+                    wasmModule.HEAPU8.set(dataArray, dataPtr);
+                    const peakFrequency = wasmModule._detector_find_peak(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetFrequency, 210);
+                    
+                    drawVisualizer(dataArray, bufferLength, peakFrequency > 0 ? targetFrequency : -1, audioContext.sampleRate);
+
+                    if (peakFrequency > 0) {
+                        statusEl.textContent = `Live peak detected near ${ (targetFrequency/1000).toFixed(1) } kHz!`;
+                        statusEl.classList.add('bg-red-500');
+                        if ('vibrate' in navigator) navigator.vibrate(100);
+                    } else {
+                        if(statusEl.classList.contains('bg-red-500')) {
+                           statusEl.textContent = "Listening...";
+                           statusEl.classList.remove('bg-red-500');
+                        }
+                    }
+                    
+                    animationFrameId = requestAnimationFrame(recordAndDetect);
+                }
+
+                analyzeHistoryButton.addEventListener('click', () => {
+                    if (historyBuffer.length === 0) {
+                        historyStatusEl.textContent = "Buffer is empty. Wait a few seconds.";
+                        return;
+                    }
+                    historyStatusEl.textContent = "Analyzing last 5 seconds...";
+
+                    let bestOverallAmplitude = 0;
+                    let bestOverallFrequency = 0;
+                    const bufferLength = analyser.frequencyBinCount;
+                    const sensitivity = parseInt(sensitivitySlider.value, 10); // Get sensitivity from slider
+
+                    for (const historicData of historyBuffer) {
+                        wasmModule.HEAPU8.set(historicData, dataPtr);
+                        // Pass sensitivity to the WASM function
+                        const currentAmplitude = wasmModule._find_strongest_peak(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, freqPtr, sensitivity);
+                        
+                        if (currentAmplitude > bestOverallAmplitude) {
+                            bestOverallAmplitude = currentAmplitude;
+                            bestOverallFrequency = wasmModule.getValue(freqPtr, 'float');
+                        }
+                    }
+
+                    if (bestOverallFrequency > 0) {
+                        const freqKHz = (bestOverallFrequency / 1000).toFixed(2);
+                        historyStatusEl.textContent = `Found peak in history: ${freqKHz} kHz!`;
+                        historyStatusEl.classList.add('bg-teal-500');
+                        if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+                    } else {
+                        historyStatusEl.textContent = "No significant peak found. Try lowering sensitivity.";
+                        historyStatusEl.classList.remove('bg-teal-500');
+                    }
+                });
+
+                function drawVisualizer(dataArray, bufferLength, detectedFreq, sampleRate) {
+                    if(!canvas.isConnected) return;
+                    canvas.width = canvas.clientWidth;
+                    canvas.height = canvas.clientHeight;
+                    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+                    const barWidth = (canvas.width / bufferLength) * 2.5;
+                    let x = 0;
+                    const detectedBin = Math.round(detectedFreq * bufferLength / (sampleRate / 2));
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        const barHeight = dataArray[i] * (canvas.height / 255);
+                        canvasCtx.fillStyle = (i >= detectedBin - 2 && i <= detectedBin + 2 && detectedFreq > 0) ? '#ef4444' : '#3b82f6';
+                        canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                        x += barWidth + 1;
+                    }
+                }
+                
+                setActiveButton(presetBeepBtn); // Set initial state
+            }
+        };
+    </script>
+    <script src="./detector.js"></script>
+</body>
+</html>
+
