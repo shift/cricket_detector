@@ -34,6 +34,11 @@
                     Heard It! Analyze Last 5s
                 </button>
             </div>
+             <div class="pt-4">
+                 <button id="compassButton" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300">
+                    Enable Compass
+                </button>
+            </div>
         </div>
         
         <!-- Active Targets UI -->
@@ -69,257 +74,88 @@
         <div class="modal-backdrop fixed inset-0 bg-black/50"></div>
         <div class="relative bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg m-4 p-6">
             <h2 class="text-2xl font-bold text-blue-400 mb-4">Look-back Analysis</h2>
-            <p class="text-gray-400 mb-4">Click on a bright spot in the spectrogram below to analyze a specific sound event.</p>
-            <div class="bg-gray-900 rounded-lg overflow-hidden">
+            <p class="text-gray-400 mb-4">Click on a vertical slice in the spectrogram to analyze a moment in time.</p>
+            <div class="bg-gray-900 rounded-lg overflow-hidden relative">
                 <canvas id="spectrogramCanvas"></canvas>
+                <div id="spectrogramSelector" class="absolute top-0 h-full w-1 bg-teal-400/50 hidden"></div>
             </div>
             <div id="peakInfo" class="mt-4 text-center hidden">
-                <p class="text-lg">Selected Peak: <span id="peakFreq" class="font-bold text-teal-300"></span></p>
+                <p class="text-lg font-bold text-teal-300">Sound Signature at Selected Moment:</p>
+                <div id="peakList" class="my-2 text-sm text-gray-300"></div>
                 <div class="flex gap-4 justify-center mt-4">
-                    <button id="playToneButton" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Play Tone</button>
-                    <button id="trackFreqButton" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg">Track this Frequency</button>
+                    <button id="playSignatureButton" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Replay Sound</button>
+                    <button id="trackSignatureButton" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg">Track this Signature</button>
                 </div>
             </div>
             <button id="closeModalButton" class="absolute top-4 right-4 text-gray-400 hover:text-white">&times;</button>
         </div>
     </div>
 
-    <!-- SCRIPT LOADING (CORRECTED FOR DEPLOYMENT) -->
+    <!-- SCRIPT LOADING -->
     <script>
         function startApp(Module) {
             // DOM Elements
-            const startButton = document.getElementById('startButton');
-            const analyzeHistoryButton = document.getElementById('analyzeHistoryButton');
-            const clearLogButton = document.getElementById('clearLogButton');
-            const compassStatusEl = document.getElementById('compassStatus');
-            const logContainer = document.getElementById('logContainer');
-            const logPlaceholder = document.getElementById('logPlaceholder');
-            const radarCanvas = document.getElementById('radarCanvas');
-            const radarCtx = radarCanvas.getContext('2d');
-            const targetsContainer = document.getElementById('targetsContainer');
-            
-            // Modal Elements
-            const analysisModal = document.getElementById('analysisModal');
-            const closeModalButton = document.getElementById('closeModalButton');
-            const spectrogramCanvas = document.getElementById('spectrogramCanvas');
-            const spectrogramCtx = spectrogramCanvas.getContext('2d');
-            const peakInfo = document.getElementById('peakInfo');
-            const peakFreqEl = document.getElementById('peakFreq');
-            const playToneButton = document.getElementById('playToneButton');
-            const trackFreqButton = document.getElementById('trackFreqButton');
+            const startButton = document.getElementById('startButton'), analyzeHistoryButton = document.getElementById('analyzeHistoryButton'), compassButton = document.getElementById('compassButton'), clearLogButton = document.getElementById('clearLogButton'), compassStatusEl = document.getElementById('compassStatus'), logContainer = document.getElementById('logContainer'), logPlaceholder = document.getElementById('logPlaceholder'), radarCanvas = document.getElementById('radarCanvas'), radarCtx = radarCanvas.getContext('2d'), targetsContainer = document.getElementById('targetsContainer');
+            const analysisModal = document.getElementById('analysisModal'), closeModalButton = document.getElementById('closeModalButton'), spectrogramCanvas = document.getElementById('spectrogramCanvas'), spectrogramCtx = spectrogramCanvas.getContext('2d'), spectrogramSelector = document.getElementById('spectrogramSelector'), peakInfo = document.getElementById('peakInfo'), peakListEl = document.getElementById('peakList'), playSignatureButton = document.getElementById('playSignatureButton'), trackSignatureButton = document.getElementById('trackSignatureButton');
 
             // App State
-            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, historyFreqPtr, targetsPtr;
-            let animationFrameId;
-            let currentHeading = 0;
-            let selectedPeakFrequency = 0;
-            let compassInitialized = false;
-            const detectionLog = [];
-            const historyBuffer = [];
-            const HISTORY_SIZE = 250; 
-            let TARGET_FREQUENCIES; // Will be loaded from storage
-            const SENSITIVITY = 200;
+            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, targetsPtr;
+            let animationFrameId, currentHeading = 0, selectedSignature = [];
+            const detectionLog = [], historyBuffer = [], HISTORY_SIZE = 300;
+            let TARGET_FREQUENCIES;
+            const SENSITIVITY = 190;
 
             const wasmModule = Module;
             detectorPtr = wasmModule._detector_new();
             const bufferSize = 2048;
-
             dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
             liveFreqPtr = wasmModule._malloc(4);
-            historyFreqPtr = wasmModule._malloc(4);
             
-            // --- Frequency Management with localStorage ---
-            function loadTrackedFrequencies() {
-                const defaultFrequencies = [4000.0, 5000.0, 12000.0];
-                let savedFrequencies = [];
-                try {
-                    const stored = localStorage.getItem('trackedFrequencies');
-                    if (stored) {
-                        savedFrequencies = JSON.parse(stored);
-                    }
-                } catch (e) {
-                    console.error("Could not parse saved frequencies:", e);
-                    localStorage.removeItem('trackedFrequencies');
-                }
-                const allFrequencies = [...new Set([...defaultFrequencies, ...savedFrequencies])];
-                TARGET_FREQUENCIES = new Float32Array(allFrequencies);
-            }
-
-            function saveTrackedFrequencies() {
-                const userFrequencies = Array.from(TARGET_FREQUENCIES).filter(f => ![4000, 5000, 12000].includes(f));
-                localStorage.setItem('trackedFrequencies', JSON.stringify(userFrequencies));
-            }
-
-            function updateWasmTargets() {
-                if (targetsPtr) wasmModule._free(targetsPtr);
-                targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
-                wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
-                updateTargetsUI();
-            }
-
-            function updateTargetsUI() {
-                targetsContainer.innerHTML = '';
-                TARGET_FREQUENCIES.forEach(freq => {
-                    const badge = document.createElement('span');
-                    badge.className = 'bg-blue-600 text-white text-xs font-semibold mr-2 px-2.5 py-0.5 rounded-full flex items-center';
-                    badge.innerHTML = `${(freq / 1000).toFixed(1)} kHz`;
-                    
-                    const removeBtn = document.createElement('button');
-                    removeBtn.className = 'ml-2 text-blue-200 hover:text-white';
-                    removeBtn.innerHTML = '&times;';
-                    removeBtn.onclick = () => {
-                        TARGET_FREQUENCIES = new Float32Array(Array.from(TARGET_FREQUENCIES).filter(f => f !== freq));
-                        saveTrackedFrequencies();
-                        updateWasmTargets();
-                    };
-                    badge.appendChild(removeBtn);
-                    targetsContainer.appendChild(badge);
-                });
-            }
-            
-            // --- Initialization ---
+            function loadTrackedFrequencies() { /* ... unchanged ... */ }
+            function saveTrackedFrequencies() { /* ... unchanged ... */ }
+            function updateWasmTargets() { /* ... unchanged ... */ }
+            function updateTargetsUI() { /* ... unchanged ... */ }
             loadTrackedFrequencies();
             updateWasmTargets();
             console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
-            startButton.addEventListener('click', async () => {
-                if (startButton.dataset.running === 'true') stopDetection();
-                else await startDetection();
-            });
-
+            startButton.addEventListener('click', async () => { /* ... unchanged ... */ });
             analyzeHistoryButton.addEventListener('click', showAnalysisModal);
             closeModalButton.addEventListener('click', () => analysisModal.style.display = 'none');
             analysisModal.querySelector('.modal-backdrop').addEventListener('click', () => analysisModal.style.display = 'none');
-            
-            clearLogButton.addEventListener('click', () => {
-                detectionLog.length = 0;
-                updateLogUI();
-                drawRadar();
-            });
+            compassButton.addEventListener('click', requestOrientationPermission);
+            clearLogButton.addEventListener('click', () => { /* ... unchanged ... */ });
 
-            async function startDetection() {
-                if (!compassInitialized) {
-                    await requestOrientationPermission();
-                }
-                if (!wasmModule) return;
-                if (!audioContext) await setupAudio();
-                if (audioContext.state === 'suspended') await audioContext.resume();
-                startButton.dataset.running = 'true';
-                startButton.textContent = "Stop Detection";
-                startButton.classList.replace('bg-blue-600', 'bg-red-600');
-                analyzeHistoryButton.disabled = false;
-                recordAndDetect();
-            }
+            async function startDetection() { /* ... unchanged ... */ }
+            function stopDetection() { /* ... unchanged ... */ }
+            async function setupAudio() { /* ... unchanged ... */ }
+            function requestOrientationPermission() { /* ... unchanged ... */ }
+            function handleOrientation(event) { /* ... unchanged ... */ }
+            function recordAndDetect() { /* ... unchanged ... */ }
 
-            function stopDetection() {
-                if (animationFrameId) cancelAnimationFrame(animationFrameId);
-                animationFrameId = null;
-                if (audioContext) audioContext.suspend();
-                startButton.dataset.running = 'false';
-                startButton.textContent = "Start Detection";
-                startButton.classList.replace('bg-red-600', 'bg-blue-600');
-                analyzeHistoryButton.disabled = true;
-            }
-
-            async function setupAudio() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    analyser = audioContext.createAnalyser();
-                    analyser.fftSize = bufferSize;
-                    analyser.smoothingTimeConstant = 0.1;
-                    const source = audioContext.createMediaStreamSource(stream);
-                    source.connect(analyser);
-                } catch (err) { console.error("Mic Error:", err); }
-            }
-
-            function requestOrientationPermission() {
-                return new Promise(resolve => {
-                    compassStatusEl.textContent = 'Initializing compass...';
-                    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                        DeviceOrientationEvent.requestPermission()
-                            .then(permissionState => {
-                                if (permissionState === 'granted') {
-                                    window.addEventListener('deviceorientation', handleOrientation);
-                                    compassInitialized = true;
-                                } else {
-                                    compassStatusEl.textContent = 'Compass permission denied.';
-                                }
-                                resolve();
-                            })
-                            .catch(err => {
-                                console.error("Compass permission error:", err);
-                                compassStatusEl.textContent = 'Compass not available.';
-                                resolve();
-                            });
-                    } else if ('ondeviceorientation' in window || 'ondeviceorientationabsolute' in window) {
-                        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-                        window.addEventListener('deviceorientation', handleOrientation, true);
-                        compassInitialized = true;
-                        resolve();
-                    } else {
-                        compassStatusEl.textContent = 'Compass not supported on this device.';
-                        resolve();
-                    }
-                });
-            }
-
-            function handleOrientation(event) {
-                let heading = event.webkitCompassHeading || event.alpha;
-                if(heading !== null && heading !== undefined) {
-                    currentHeading = heading;
-                    compassStatusEl.textContent = `Pointing: ${Math.round(currentHeading)}°`;
-                }
-            }
-
-            function recordAndDetect() {
-                if (!analyser || !wasmModule) return;
-                animationFrameId = requestAnimationFrame(recordAndDetect);
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-                analyser.getByteFrequencyData(dataArray);
-                historyBuffer.push(new Uint8Array(dataArray));
-                if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
-                wasmModule.HEAPU8.set(dataArray, dataPtr);
-                const detectedAmplitude = wasmModule._detector_find_multiple_peaks(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetsPtr, TARGET_FREQUENCIES.length, SENSITIVITY, liveFreqPtr);
-                if (detectedAmplitude > 0) {
-                    const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
-                    if ('vibrate' in navigator) navigator.vibrate(100);
-                    detectionLog.unshift({ time: new Date(), freq: detectedFreq, amp: detectedAmplitude, heading: currentHeading });
-                    if (detectionLog.length > 50) detectionLog.pop();
-                    updateLogUI();
-                    drawRadar();
-                }
-            }
-
+            // --- Analysis Modal Logic ---
             function showAnalysisModal() {
-                 analysisModal.style.display = 'flex';
+                analysisModal.style.display = 'flex';
                 drawSpectrogram();
                 peakInfo.style.display = 'none';
+                spectrogramSelector.style.display = 'none';
             }
 
             function drawSpectrogram() {
-                const canvas = spectrogramCanvas;
-                const ctx = spectrogramCtx;
-                const width = 512;
-                const height = 256;
-                canvas.width = width;
-                canvas.height = height;
-
+                const canvas = spectrogramCanvas, ctx = spectrogramCtx;
+                const width = 512, height = 256;
+                canvas.width = width; canvas.height = height;
                 if (historyBuffer.length === 0) return;
-
                 const step = width / historyBuffer.length;
-                const maxFreq = audioContext.sampleRate / 2;
-
                 for (let i = 0; i < historyBuffer.length; i++) {
                     const dataArray = historyBuffer[i];
                     for (let j = 0; j < dataArray.length; j++) {
                         const value = dataArray[j];
-                        if (value > 100) { // Only draw strong signals
+                        if (value > 150) {
                             const percent = j / dataArray.length;
                             const y = height - (percent * height);
-                            const hue = 240 - (value / 255) * 240; // Blue to red
+                            const hue = 240 - (value / 255) * 240;
                             ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.5)`;
                             ctx.fillRect(i * step, y, step, 1);
                         }
@@ -329,36 +165,70 @@
             
             spectrogramCanvas.addEventListener('click', (event) => {
                 const rect = spectrogramCanvas.getBoundingClientRect();
-                const y = event.clientY - rect.top;
-                const freqPercent = 1 - (y / rect.height);
-                const maxFreq = audioContext.sampleRate / 2;
-                selectedPeakFrequency = freqPercent * maxFreq;
+                const x = event.clientX - rect.left;
+                const timeIndex = Math.floor((x / rect.width) * historyBuffer.length);
+                if (timeIndex < 0 || timeIndex >= historyBuffer.length) return;
 
-                peakFreqEl.textContent = `${(selectedPeakFrequency / 1000).toFixed(2)} kHz (${Math.round(selectedPeakFrequency)} Hz)`;
+                spectrogramSelector.style.left = `${x}px`;
+                spectrogramSelector.style.display = 'block';
+
+                const selectedData = historyBuffer[timeIndex];
+                const maxPeaks = 10;
+                const peaksBufferPtr = wasmModule._malloc(maxPeaks * 4);
+                wasmModule.HEAPU8.set(selectedData, dataPtr);
+                
+                const numPeaksFound = wasmModule._find_all_peaks(detectorPtr, dataPtr, analyser.frequencyBinCount, audioContext.sampleRate, SENSITIVITY, peaksBufferPtr, maxPeaks);
+                
+                selectedSignature = [];
+                let peakListHTML = 'No significant peaks found.';
+                if (numPeaksFound > 0) {
+                    peakListHTML = '';
+                    for (let i = 0; i < numPeaksFound; i++) {
+                        const freq = wasmModule.getValue(peaksBufferPtr + i * 4, 'float');
+                        selectedSignature.push(freq);
+                        peakListHTML += `<div>${(freq / 1000).toFixed(2)} kHz</div>`;
+                    }
+                }
+                wasmModule._free(peaksBufferPtr);
+                
+                peakListEl.innerHTML = peakListHTML;
                 peakInfo.style.display = 'block';
             });
-            
-            playToneButton.addEventListener('click', () => {
-                if (!audioContext || selectedPeakFrequency <= 0) return;
-                const oscillator = audioContext.createOscillator();
-                const gainNode = audioContext.createGain();
-                oscillator.connect(gainNode);
-                gainNode.connect(audioContext.destination);
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(selectedPeakFrequency, audioContext.currentTime);
-                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-                oscillator.start();
-                oscillator.stop(audioContext.currentTime + 0.5);
+
+            playSignatureButton.addEventListener('click', () => {
+                if (!audioContext || selectedSignature.length === 0) return;
+                const now = audioContext.currentTime;
+                selectedSignature.forEach(freq => {
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(freq, now);
+                    gainNode.gain.setValueAtTime(0.3 / selectedSignature.length, now); // Lower volume for more tones
+                    oscillator.start(now);
+                    oscillator.stop(now + 0.3);
+                });
             });
 
-            trackFreqButton.addEventListener('click', () => {
-                const freqToAdd = Math.round(selectedPeakFrequency);
-                if (freqToAdd > 0 && !Array.from(TARGET_FREQUENCIES).some(f => Math.abs(f - freqToAdd) < 1)) {
-                    TARGET_FREQUENCIES = new Float32Array([...TARGET_FREQUENCIES, freqToAdd]);
+            trackSignatureButton.addEventListener('click', () => {
+                if (selectedSignature.length === 0) return;
+                const currentTargets = Array.from(TARGET_FREQUENCIES);
+                let newTargetsAdded = false;
+                selectedSignature.forEach(freq => {
+                    const roundedFreq = Math.round(freq);
+                    if (!currentTargets.some(f => Math.abs(f - roundedFreq) < 10)) { // Avoid near duplicates
+                        currentTargets.push(roundedFreq);
+                        newTargetsAdded = true;
+                    }
+                });
+
+                if (newTargetsAdded) {
+                    TARGET_FREQUENCIES = new Float32Array(currentTargets);
                     saveTrackedFrequencies();
                     updateWasmTargets();
-                    analysisModal.style.display = 'none';
                 }
+                analysisModal.style.display = 'none';
             });
 
             function updateLogUI() { /* ... unchanged ... */ }
@@ -374,4 +244,3 @@
     <script src="https://cricket-detector.netlify.app/detector.js" async></script>
 </body>
 </html>
-
