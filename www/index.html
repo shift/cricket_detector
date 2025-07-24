@@ -176,10 +176,50 @@
             languageSwitcher.addEventListener('change', (e) => setLanguage(e.target.value));
             
             // --- Frequency Management ---
-            function loadTrackedFrequencies() { /* ... unchanged ... */ }
-            function saveTrackedFrequencies() { /* ... unchanged ... */ }
-            function updateWasmTargets() { /* ... unchanged ... */ }
-            function updateTargetsUI() { /* ... unchanged ... */ }
+            function loadTrackedFrequencies() {
+                const defaultFrequencies = [4000.0, 5000.0, 12000.0];
+                let savedFrequencies = [];
+                try {
+                    const stored = localStorage.getItem('trackedFrequencies');
+                    if (stored) savedFrequencies = JSON.parse(stored);
+                } catch (e) {
+                    console.error("Could not parse saved frequencies:", e);
+                    localStorage.removeItem('trackedFrequencies');
+                }
+                const allFrequencies = [...new Set([...defaultFrequencies, ...savedFrequencies])];
+                TARGET_FREQUENCIES = new Float32Array(allFrequencies);
+            }
+
+            function saveTrackedFrequencies() {
+                const userFrequencies = Array.from(TARGET_FREQUENCIES).filter(f => ![4000, 5000, 12000].includes(f));
+                localStorage.setItem('trackedFrequencies', JSON.stringify(userFrequencies));
+            }
+
+            function updateWasmTargets() {
+                if (targetsPtr) wasmModule._free(targetsPtr);
+                targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
+                wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
+                updateTargetsUI();
+            }
+
+            function updateTargetsUI() {
+                targetsContainer.innerHTML = '';
+                TARGET_FREQUENCIES.forEach(freq => {
+                    const badge = document.createElement('span');
+                    badge.className = 'bg-blue-600 text-white text-xs font-semibold mr-2 px-2.5 py-0.5 rounded-full flex items-center';
+                    badge.innerHTML = `${(freq / 1000).toFixed(1)} kHz`;
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'ml-2 text-blue-200 hover:text-white';
+                    removeBtn.innerHTML = '&times;';
+                    removeBtn.onclick = () => {
+                        TARGET_FREQUENCIES = new Float32Array(Array.from(TARGET_FREQUENCIES).filter(f => f !== freq));
+                        saveTrackedFrequencies();
+                        updateWasmTargets();
+                    };
+                    badge.appendChild(removeBtn);
+                    targetsContainer.appendChild(badge);
+                });
+            }
             
             // --- Initialization ---
             const savedLang = localStorage.getItem('detector_language') || 'en';
@@ -224,7 +264,17 @@
                 analyzeHistoryButton.disabled = true;
             }
 
-            async function setupAudio() { /* ... unchanged ... */ }
+            async function setupAudio() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = bufferSize;
+                    analyser.smoothingTimeConstant = 0.1;
+                    const source = audioContext.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                } catch (err) { console.error("Mic Error:", err); }
+            }
 
             // --- Auto-Compass Initialization ---
             function initializeCompass() {
@@ -251,7 +301,7 @@
                         }).catch(() => {
                             compassStatusEl.textContent = translations[languageSwitcher.value].compassNoSupport;
                         });
-                } else {
+                } else if ('ondeviceorientation' in window) {
                     // Other devices
                     window.addEventListener('deviceorientation', handleOrientation);
                     // Check if the event ever fires
@@ -260,6 +310,8 @@
                              compassStatusEl.textContent = translations[languageSwitcher.value].compassNoSupport;
                         }
                     }, 2000);
+                } else {
+                    compassStatusEl.textContent = translations[languageSwitcher.value].compassNoSupport;
                 }
             }
 
@@ -283,11 +335,101 @@
                 }
             }
             
-            function showAnalysisModal() { /* ... unchanged ... */ }
-            function drawSpectrogram() { /* ... unchanged ... */ }
-            spectrogramCanvas.addEventListener('click', (event) => { /* ... unchanged ... */ });
-            playSignatureButton.addEventListener('click', () => { /* ... unchanged ... */ });
-            trackSignatureButton.addEventListener('click', () => { /* ... unchanged ... */ });
+            function showAnalysisModal() {
+                analysisModal.style.display = 'flex';
+                drawSpectrogram();
+                peakInfo.style.display = 'none';
+                spectrogramSelector.style.display = 'none';
+            }
+
+            function drawSpectrogram() {
+                const canvas = spectrogramCanvas, ctx = spectrogramCtx;
+                const width = 512, height = 256;
+                canvas.width = width; canvas.height = height;
+                if (historyBuffer.length === 0) return;
+                const step = width / historyBuffer.length;
+                for (let i = 0; i < historyBuffer.length; i++) {
+                    const dataArray = historyBuffer[i];
+                    for (let j = 0; j < dataArray.length; j++) {
+                        const value = dataArray[j];
+                        if (value > 150) {
+                            const percent = j / dataArray.length;
+                            const y = height - (percent * height);
+                            const hue = 240 - (value / 255) * 240;
+                            ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.5)`;
+                            ctx.fillRect(i * step, y, step, 1);
+                        }
+                    }
+                }
+            }
+            
+            spectrogramCanvas.addEventListener('click', (event) => {
+                const rect = spectrogramCanvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const timeIndex = Math.floor((x / rect.width) * historyBuffer.length);
+                if (timeIndex < 0 || timeIndex >= historyBuffer.length) return;
+
+                spectrogramSelector.style.left = `${x}px`;
+                spectrogramSelector.style.display = 'block';
+
+                const selectedData = historyBuffer[timeIndex];
+                const maxPeaks = 10;
+                const peaksBufferPtr = wasmModule._malloc(maxPeaks * 4);
+                wasmModule.HEAPU8.set(selectedData, dataPtr);
+                
+                const numPeaksFound = wasmModule._find_all_peaks(detectorPtr, dataPtr, analyser.frequencyBinCount, audioContext.sampleRate, SENSITIVITY, peaksBufferPtr, maxPeaks);
+                
+                selectedSignature = [];
+                let peakListHTML = `<div class="italic">${translations[languageSwitcher.value].noPeaks}</div>`;
+                if (numPeaksFound > 0) {
+                    peakListHTML = '';
+                    for (let i = 0; i < numPeaksFound; i++) {
+                        const freq = wasmModule.getValue(peaksBufferPtr + i * 4, 'float');
+                        selectedSignature.push(freq);
+                        peakListHTML += `<div>${(freq / 1000).toFixed(2)} kHz</div>`;
+                    }
+                }
+                wasmModule._free(peaksBufferPtr);
+                
+                peakListEl.innerHTML = peakListHTML;
+                peakInfo.style.display = 'block';
+            });
+
+            playSignatureButton.addEventListener('click', () => {
+                if (!audioContext || selectedSignature.length === 0) return;
+                const now = audioContext.currentTime;
+                selectedSignature.forEach(freq => {
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(freq, now);
+                    gainNode.gain.setValueAtTime(0.3 / selectedSignature.length, now);
+                    oscillator.start(now);
+                    oscillator.stop(now + 0.3);
+                });
+            });
+
+            trackSignatureButton.addEventListener('click', () => {
+                if (selectedSignature.length === 0) return;
+                const currentTargets = Array.from(TARGET_FREQUENCIES);
+                let newTargetsAdded = false;
+                selectedSignature.forEach(freq => {
+                    const roundedFreq = Math.round(freq);
+                    if (!currentTargets.some(f => Math.abs(f - roundedFreq) < 10)) {
+                        currentTargets.push(roundedFreq);
+                        newTargetsAdded = true;
+                    }
+                });
+
+                if (newTargetsAdded) {
+                    TARGET_FREQUENCIES = new Float32Array(currentTargets);
+                    saveTrackedFrequencies();
+                    updateWasmTargets();
+                }
+                analysisModal.style.display = 'none';
+            });
 
             function updateLogUI() {
                 logContainer.innerHTML = '';
