@@ -57,12 +57,10 @@
     </div>
 
     <!-- SCRIPT LOADING (FIXED) -->
-    <!-- First, load the Emscripten-generated library. It will create a global `createModule` function. -->
-    <script src="./detector.js" defer></script>
-    <!-- Second, run our application logic, which calls the now-available `createModule` function. -->
-    <script defer>
-        // No import needed. The createModule function is now globally available.
-        createModule().then(Module => {
+    <script>
+        // This function contains all our application logic.
+        // It will be called by the Module object once the WASM runtime is ready.
+        function startApp(Module) {
             // DOM Elements
             const startButton = document.getElementById('startButton');
             const compassButton = document.getElementById('compassButton');
@@ -81,13 +79,13 @@
             const TARGET_FREQUENCIES = new Float32Array([4000.0, 5000.0, 12000.0]);
             const SENSITIVITY = 200;
 
-            // WASM is already loaded by the .then() wrapper, so we can assign it directly.
+            // WASM is already loaded, so we can assign it directly.
             const wasmModule = Module;
             detectorPtr = wasmModule._detector_new();
             const bufferSize = 2048;
             dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
             liveFreqPtr = wasmModule._malloc(4);
-            console.log("WASM module initialized.");
+            console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
             startButton.addEventListener('click', async () => {
@@ -114,7 +112,10 @@
             }
 
             function stopDetection() {
-                cancelAnimationFrame(animationFrameId);
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
                 if (audioContext) audioContext.suspend();
                 startButton.dataset.running = 'false';
                 startButton.textContent = "Start Detection";
@@ -224,6 +225,7 @@
             }
 
             function drawRadar() {
+                if (!radarCanvas.isConnected) return;
                 const size = radarCanvas.getBoundingClientRect().width;
                 radarCanvas.width = size;
                 radarCanvas.height = size;
@@ -274,8 +276,17 @@
             // Initial Draw
             window.addEventListener('resize', drawRadar);
             drawRadar();
-        });
+        }
+
+        // Set up the Module object for the Emscripten loader.
+        // This is the standard way to ensure the app logic runs *after* the WASM is ready.
+        var Module = {
+            onRuntimeInitialized: function() {
+                startApp(Module);
+            }
+        };
     </script>
+    <script src="./detector.js" async></script>
 </body>
 </html>
 
