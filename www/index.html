@@ -56,13 +56,11 @@
         </div>
     </div>
 
-    <!-- SCRIPT LOADING (FIXED) -->
-    <!-- First, load the Emscripten-generated library. It will create a global `createModule` function. -->
-    <script src="./detector.js" defer></script>
-    <!-- Second, run our application logic, which calls the now-available `createModule` function. -->
-    <script defer>
-        // No import needed. The createModule function is now globally available.
-        createModule().then(Module => {
+    <!-- SCRIPT LOADING (CORRECTED & ROBUST) -->
+    <script>
+        // This function contains all our application logic.
+        // It will be called by the Module object once the WASM runtime is ready.
+        function startApp(Module) {
             // DOM Elements
             const startButton = document.getElementById('startButton');
             const compassButton = document.getElementById('compassButton');
@@ -74,20 +72,23 @@
             const radarCtx = radarCanvas.getContext('2d');
 
             // App State
-            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr;
+            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, targetsPtr;
             let animationFrameId;
             let currentHeading = 0;
             const detectionLog = [];
             const TARGET_FREQUENCIES = new Float32Array([4000.0, 5000.0, 12000.0]);
             const SENSITIVITY = 200;
 
-            // WASM is already loaded by the .then() wrapper, so we can assign it directly.
             const wasmModule = Module;
             detectorPtr = wasmModule._detector_new();
             const bufferSize = 2048;
+
             dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
             liveFreqPtr = wasmModule._malloc(4);
-            console.log("WASM module initialized.");
+            targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
+            wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
+
+            console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
             startButton.addEventListener('click', async () => {
@@ -114,7 +115,10 @@
             }
 
             function stopDetection() {
-                cancelAnimationFrame(animationFrameId);
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
                 if (audioContext) audioContext.suspend();
                 startButton.dataset.running = 'false';
                 startButton.textContent = "Start Detection";
@@ -126,7 +130,7 @@
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     analyser = audioContext.createAnalyser();
-                    analyser.fftSize = 2048;
+                    analyser.fftSize = bufferSize;
                     analyser.smoothingTimeConstant = 0.1;
                     const source = audioContext.createMediaStreamSource(stream);
                     source.connect(analyser);
@@ -170,8 +174,6 @@
                 const dataArray = new Uint8Array(bufferLength);
                 analyser.getByteFrequencyData(dataArray);
 
-                const targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
-                wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
                 wasmModule.HEAPU8.set(dataArray, dataPtr);
 
                 const detectedAmplitude = wasmModule._detector_find_multiple_peaks(
@@ -179,8 +181,6 @@
                     targetsPtr, TARGET_FREQUENCIES.length, SENSITIVITY, liveFreqPtr
                 );
                 
-                wasmModule._free(targetsPtr);
-
                 if (detectedAmplitude > 0) {
                     const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
                     if ('vibrate' in navigator) navigator.vibrate(100);
@@ -224,6 +224,7 @@
             }
 
             function drawRadar() {
+                if (!radarCanvas.isConnected) return;
                 const size = radarCanvas.getBoundingClientRect().width;
                 radarCanvas.width = size;
                 radarCanvas.height = size;
@@ -274,8 +275,21 @@
             // Initial Draw
             window.addEventListener('resize', drawRadar);
             drawRadar();
-        });
+        }
+
+        // Set up the Module object for the Emscripten loader.
+        // This MUST be defined before the detector.js script is loaded.
+        var Module = {
+            // This function will be called by the loader when the WASM is compiled and ready.
+            onRuntimeInitialized: function() {
+                startApp(Module);
+            }
+        };
     </script>
+    
+    <!-- Load the Emscripten JS loader. It will find the global 'Module' object,
+         use its config, and call onRuntimeInitialized when done. -->
+    <script src="./detector.js" async></script>
 </body>
 </html>
 
