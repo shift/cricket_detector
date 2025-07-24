@@ -56,227 +56,225 @@
         </div>
     </div>
 
-    <script type="module">
-        import createModule from './detector.js';
-
-        // DOM Elements
-        const startButton = document.getElementById('startButton');
-        const compassButton = document.getElementById('compassButton');
-        const clearLogButton = document.getElementById('clearLogButton');
-        const statusEl = document.getElementById('status'); // Re-add if needed
-        const compassStatusEl = document.getElementById('compassStatus');
-        const logContainer = document.getElementById('logContainer');
-        const logPlaceholder = document.getElementById('logPlaceholder');
-        const radarCanvas = document.getElementById('radarCanvas');
-        const radarCtx = radarCanvas.getContext('2d');
-
-        // App State
-        let audioContext, analyser, wasmModule, detectorPtr, dataPtr, liveFreqPtr;
-        let animationFrameId;
-        let currentHeading = 0;
-        const detectionLog = [];
-        const TARGET_FREQUENCIES = new Float32Array([4000.0, 5000.0, 12000.0]);
-        const SENSITIVITY = 200;
-
-        // --- WASM Setup ---
+    <!-- SCRIPT LOADING (FIXED) -->
+    <!-- First, load the Emscripten-generated library. It will create a global `createModule` function. -->
+    <script src="./detector.js" defer></script>
+    <!-- Second, run our application logic, which calls the now-available `createModule` function. -->
+    <script defer>
+        // No import needed. The createModule function is now globally available.
         createModule().then(Module => {
-            wasmModule = Module;
+            // DOM Elements
+            const startButton = document.getElementById('startButton');
+            const compassButton = document.getElementById('compassButton');
+            const clearLogButton = document.getElementById('clearLogButton');
+            const compassStatusEl = document.getElementById('compassStatus');
+            const logContainer = document.getElementById('logContainer');
+            const logPlaceholder = document.getElementById('logPlaceholder');
+            const radarCanvas = document.getElementById('radarCanvas');
+            const radarCtx = radarCanvas.getContext('2d');
+
+            // App State
+            let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr;
+            let animationFrameId;
+            let currentHeading = 0;
+            const detectionLog = [];
+            const TARGET_FREQUENCIES = new Float32Array([4000.0, 5000.0, 12000.0]);
+            const SENSITIVITY = 200;
+
+            // WASM is already loaded by the .then() wrapper, so we can assign it directly.
+            const wasmModule = Module;
             detectorPtr = wasmModule._detector_new();
             const bufferSize = 2048;
             dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
             liveFreqPtr = wasmModule._malloc(4);
-            console.log("WASM module loaded.");
-        });
+            console.log("WASM module initialized.");
 
-        // --- Control Logic ---
-        startButton.addEventListener('click', async () => {
-            if (startButton.dataset.running === 'true') stopDetection();
-            else await startDetection();
-        });
+            // --- Control Logic ---
+            startButton.addEventListener('click', async () => {
+                if (startButton.dataset.running === 'true') stopDetection();
+                else await startDetection();
+            });
 
-        compassButton.addEventListener('click', requestOrientationPermission);
-        
-        clearLogButton.addEventListener('click', () => {
-            detectionLog.length = 0;
-            updateLogUI();
-            drawRadar();
-        });
-
-        async function startDetection() {
-            if (!wasmModule) return;
-            if (!audioContext) await setupAudio();
-            if (audioContext.state === 'suspended') await audioContext.resume();
-            startButton.dataset.running = 'true';
-            startButton.textContent = "Stop Detection";
-            startButton.classList.replace('bg-blue-600', 'bg-red-600');
-            recordAndDetect();
-        }
-
-        function stopDetection() {
-            cancelAnimationFrame(animationFrameId);
-            if (audioContext) audioContext.suspend();
-            startButton.dataset.running = 'false';
-            startButton.textContent = "Start Detection";
-            startButton.classList.replace('bg-red-600', 'bg-blue-600');
-        }
-
-        async function setupAudio() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048;
-                analyser.smoothingTimeConstant = 0.1;
-                const source = audioContext.createMediaStreamSource(stream);
-                source.connect(analyser);
-            } catch (err) { console.error("Mic Error:", err); }
-        }
-
-        // --- Compass / Device Orientation ---
-        function requestOrientationPermission() {
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                            compassButton.disabled = true;
-                            compassButton.textContent = "Compass Enabled";
-                        }
-                    })
-                    .catch(console.error);
-            } else {
-                // Handle non-iOS 13+ devices
-                window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-                window.addEventListener('deviceorientation', handleOrientation, true);
-                compassButton.disabled = true;
-                compassButton.textContent = "Compass Enabled";
-            }
-        }
-
-        function handleOrientation(event) {
-            let heading = event.webkitCompassHeading || event.alpha;
-            if(heading !== null) {
-                currentHeading = heading;
-                compassStatusEl.textContent = `Pointing: ${Math.round(currentHeading)}°`;
-            }
-        }
-
-        // --- Main Detection Loop ---
-        function recordAndDetect() {
-            if (!analyser || !wasmModule) return;
-            animationFrameId = requestAnimationFrame(recordAndDetect);
-
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-            analyser.getByteFrequencyData(dataArray);
-
-            const targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
-            wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
-            wasmModule.HEAPU8.set(dataArray, dataPtr);
-
-            const detectedAmplitude = wasmModule._detector_find_multiple_peaks(
-                detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, 
-                targetsPtr, TARGET_FREQUENCIES.length, SENSITIVITY, liveFreqPtr
-            );
+            compassButton.addEventListener('click', requestOrientationPermission);
             
-            wasmModule._free(targetsPtr);
-
-            if (detectedAmplitude > 0) {
-                const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
-                if ('vibrate' in navigator) navigator.vibrate(100);
-                
-                detectionLog.unshift({
-                    time: new Date(),
-                    freq: detectedFreq,
-                    amp: detectedAmplitude,
-                    heading: currentHeading
-                });
-                if (detectionLog.length > 50) detectionLog.pop(); // Keep log from getting too big
+            clearLogButton.addEventListener('click', () => {
+                detectionLog.length = 0;
                 updateLogUI();
                 drawRadar();
-            }
-        }
-        
-        // --- UI Update Functions ---
-        function updateLogUI() {
-            logContainer.innerHTML = '';
-            if (detectionLog.length === 0) {
-                logContainer.innerHTML = `<p id="logPlaceholder" class="text-gray-500 text-center pt-4">Waiting for detections...</p>`;
-                return;
-            }
-            detectionLog.forEach(entry => {
-                const logEntry = document.createElement('div');
-                logEntry.className = 'bg-gray-700/50 p-2 rounded-md text-sm animate-pulse-once';
-                const ampPercent = Math.max(0, Math.min(100, ((entry.amp - SENSITIVITY) / (255 - SENSITIVITY)) * 100));
-                logEntry.innerHTML = `
-                    <div class="flex justify-between items-center">
-                        <span class="font-mono text-xs text-gray-400">${entry.time.toLocaleTimeString()}</span>
-                        <span class="font-bold text-blue-300">${(entry.freq / 1000).toFixed(1)} kHz</span>
-                        <span class="text-gray-300">Loudness: ${entry.amp}</span>
-                        <span class="text-purple-300">${Math.round(entry.heading)}°</span>
-                    </div>
-                    <div class="w-full amp-bar-container rounded-full h-2 mt-1">
-                        <div class="amp-bar h-2 rounded-full" style="width: ${ampPercent}%;"></div>
-                    </div>
-                `;
-                logContainer.appendChild(logEntry);
             });
-        }
 
-        function drawRadar() {
-            const size = radarCanvas.getBoundingClientRect().width;
-            radarCanvas.width = size;
-            radarCanvas.height = size;
-            const center = size / 2;
-            const radius = center * 0.9;
-            
-            radarCtx.clearRect(0, 0, size, size);
+            async function startDetection() {
+                if (!wasmModule) return;
+                if (!audioContext) await setupAudio();
+                if (audioContext.state === 'suspended') await audioContext.resume();
+                startButton.dataset.running = 'true';
+                startButton.textContent = "Stop Detection";
+                startButton.classList.replace('bg-blue-600', 'bg-red-600');
+                recordAndDetect();
+            }
 
-            // Draw grid
-            radarCtx.strokeStyle = 'rgba(75, 85, 99, 0.5)';
-            radarCtx.fillStyle = 'rgba(156, 163, 175, 0.7)';
-            radarCtx.font = `${center * 0.08}px Inter`;
-            radarCtx.textAlign = 'center';
-            radarCtx.textBaseline = 'middle';
+            function stopDetection() {
+                cancelAnimationFrame(animationFrameId);
+                if (audioContext) audioContext.suspend();
+                startButton.dataset.running = 'false';
+                startButton.textContent = "Start Detection";
+                startButton.classList.replace('bg-red-600', 'bg-blue-600');
+            }
 
-            ['N', 'E', 'S', 'W'].forEach((dir, i) => {
-                const angle = i * Math.PI / 2 - Math.PI / 2;
-                const x = center + (radius * 1.05) * Math.cos(angle);
-                const y = center + (radius * 1.05) * Math.sin(angle);
-                radarCtx.fillText(dir, x, y);
-            });
-            
-            radarCtx.beginPath();
-            radarCtx.arc(center, center, radius * 0.8, 0, 2 * Math.PI);
-            radarCtx.stroke();
-            radarCtx.beginPath();
-            radarCtx.arc(center, center, radius * 0.4, 0, 2 * Math.PI);
-            radarCtx.stroke();
+            async function setupAudio() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    analyser.smoothingTimeConstant = 0.1;
+                    const source = audioContext.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                } catch (err) { console.error("Mic Error:", err); }
+            }
 
-            // Draw detection points
-            detectionLog.forEach((entry, index) => {
-                const angle = (entry.heading - 90) * Math.PI / 180; // Convert to radians and offset
-                const loudnessRatio = Math.max(0, Math.min(1, (entry.amp - SENSITIVITY) / (255 - SENSITIVITY)));
-                const distanceFromCenter = loudnessRatio * radius;
+            // --- Compass / Device Orientation ---
+            function requestOrientationPermission() {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                window.addEventListener('deviceorientation', handleOrientation);
+                                compassButton.disabled = true;
+                                compassButton.textContent = "Compass Enabled";
+                            }
+                        })
+                        .catch(console.error);
+                } else {
+                    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+                    window.addEventListener('deviceorientation', handleOrientation, true);
+                    compassButton.disabled = true;
+                    compassButton.textContent = "Compass Enabled";
+                }
+            }
+
+            function handleOrientation(event) {
+                let heading = event.webkitCompassHeading || event.alpha;
+                if(heading !== null) {
+                    currentHeading = heading;
+                    compassStatusEl.textContent = `Pointing: ${Math.round(currentHeading)}°`;
+                }
+            }
+
+            // --- Main Detection Loop ---
+            function recordAndDetect() {
+                if (!analyser || !wasmModule) return;
+                animationFrameId = requestAnimationFrame(recordAndDetect);
+
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+
+                const targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
+                wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
+                wasmModule.HEAPU8.set(dataArray, dataPtr);
+
+                const detectedAmplitude = wasmModule._detector_find_multiple_peaks(
+                    detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, 
+                    targetsPtr, TARGET_FREQUENCIES.length, SENSITIVITY, liveFreqPtr
+                );
                 
-                const x = center + distanceFromCenter * Math.cos(angle);
-                const y = center + distanceFromCenter * Math.sin(angle);
+                wasmModule._free(targetsPtr);
+
+                if (detectedAmplitude > 0) {
+                    const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
+                    if ('vibrate' in navigator) navigator.vibrate(100);
+                    
+                    detectionLog.unshift({
+                        time: new Date(),
+                        freq: detectedFreq,
+                        amp: detectedAmplitude,
+                        heading: currentHeading
+                    });
+                    if (detectionLog.length > 50) detectionLog.pop();
+                    updateLogUI();
+                    drawRadar();
+                }
+            }
+            
+            // --- UI Update Functions ---
+            function updateLogUI() {
+                logContainer.innerHTML = '';
+                if (detectionLog.length === 0) {
+                    logContainer.innerHTML = `<p id="logPlaceholder" class="text-gray-500 text-center pt-4">Waiting for detections...</p>`;
+                    return;
+                }
+                detectionLog.forEach(entry => {
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'bg-gray-700/50 p-2 rounded-md text-sm animate-pulse-once';
+                    const ampPercent = Math.max(0, Math.min(100, ((entry.amp - SENSITIVITY) / (255 - SENSITIVITY)) * 100));
+                    logEntry.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <span class="font-mono text-xs text-gray-400">${entry.time.toLocaleTimeString()}</span>
+                            <span class="font-bold text-blue-300">${(entry.freq / 1000).toFixed(1)} kHz</span>
+                            <span class="text-gray-300">Loudness: ${entry.amp}</span>
+                            <span class="text-purple-300">${Math.round(entry.heading)}°</span>
+                        </div>
+                        <div class="w-full amp-bar-container rounded-full h-2 mt-1">
+                            <div class="amp-bar h-2 rounded-full" style="width: ${ampPercent}%;"></div>
+                        </div>
+                    `;
+                    logContainer.appendChild(logEntry);
+                });
+            }
+
+            function drawRadar() {
+                const size = radarCanvas.getBoundingClientRect().width;
+                radarCanvas.width = size;
+                radarCanvas.height = size;
+                const center = size / 2;
+                const radius = center * 0.9;
                 
-                const pointRadius = 2 + loudnessRatio * 4;
-                const opacity = 1 - (index / detectionLog.length); // Fade older points
+                radarCtx.clearRect(0, 0, size, size);
+
+                radarCtx.strokeStyle = 'rgba(75, 85, 99, 0.5)';
+                radarCtx.fillStyle = 'rgba(156, 163, 175, 0.7)';
+                radarCtx.font = `${center * 0.08}px Inter`;
+                radarCtx.textAlign = 'center';
+                radarCtx.textBaseline = 'middle';
+
+                ['N', 'E', 'S', 'W'].forEach((dir, i) => {
+                    const angle = i * Math.PI / 2 - Math.PI / 2;
+                    const x = center + (radius * 1.05) * Math.cos(angle);
+                    const y = center + (radius * 1.05) * Math.sin(angle);
+                    radarCtx.fillText(dir, x, y);
+                });
                 
                 radarCtx.beginPath();
-                // Color based on loudness
-                const hue = 120 - (loudnessRatio * 120); // Green (120) to Red (0)
-                radarCtx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
-                radarCtx.arc(x, y, pointRadius, 0, 2 * Math.PI);
-                radarCtx.fill();
-            });
-        }
+                radarCtx.arc(center, center, radius * 0.8, 0, 2 * Math.PI);
+                radarCtx.stroke();
+                radarCtx.beginPath();
+                radarCtx.arc(center, center, radius * 0.4, 0, 2 * Math.PI);
+                radarCtx.stroke();
 
-        // Initial Draw
-        window.addEventListener('resize', drawRadar);
-        drawRadar();
+                detectionLog.forEach((entry, index) => {
+                    const angle = (entry.heading - 90) * Math.PI / 180;
+                    const loudnessRatio = Math.max(0, Math.min(1, (entry.amp - SENSITIVITY) / (255 - SENSITIVITY)));
+                    const distanceFromCenter = loudnessRatio * radius;
+                    
+                    const x = center + distanceFromCenter * Math.cos(angle);
+                    const y = center + distanceFromCenter * Math.sin(angle);
+                    
+                    const pointRadius = 2 + loudnessRatio * 4;
+                    const opacity = 1 - (index / detectionLog.length);
+                    
+                    radarCtx.beginPath();
+                    const hue = 120 - (loudnessRatio * 120);
+                    radarCtx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
+                    radarCtx.arc(x, y, pointRadius, 0, 2 * Math.PI);
+                    radarCtx.fill();
+                });
+            }
+
+            // Initial Draw
+            window.addEventListener('resize', drawRadar);
+            drawRadar();
+        });
     </script>
 </body>
 </html>
