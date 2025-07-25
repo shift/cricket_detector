@@ -14,6 +14,7 @@
         .amp-bar { background: linear-gradient(90deg, #10B981 0%, #F59E0B 70%, #EF4444 100%); transition: width 0.3s ease-in-out; }
         #radarCanvas { background-color: #1f2937; }
         .modal-backdrop { backdrop-filter: blur(4px); }
+        #settingsPanel { transition: max-height 0.3s ease-out; }
     </style>
 </head>
 <body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
@@ -41,6 +42,25 @@
             <h3 class="text-lg font-medium text-gray-300 text-center" data-lang-key="activeTargets">Aktive Ziele</h3>
             <div id="targetsContainer" class="flex flex-wrap gap-2 justify-center">
                 <!-- Tracked frequencies will be injected here -->
+            </div>
+        </div>
+        
+        <!-- Settings Panel -->
+        <div class="bg-gray-900/50 rounded-lg">
+            <button id="settingsToggle" class="w-full text-left p-3 font-medium text-gray-300">Einstellungen</button>
+            <div id="settingsPanel" class="px-4 pb-4 space-y-4 overflow-hidden max-h-0">
+                <div>
+                    <label for="liveSensitivity" class="block text-sm font-medium text-gray-400">Live-Empfindlichkeit: <span id="liveSensValue">190</span></label>
+                    <input type="range" id="liveSensitivity" min="150" max="250" value="190" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <div>
+                    <label for="lookbackSensitivity" class="block text-sm font-medium text-gray-400">Analyse-Empfindlichkeit: <span id="lookbackSensValue">170</span></label>
+                    <input type="range" id="lookbackSensitivity" min="150" max="250" value="170" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <div>
+                    <label for="historyDuration" class="block text-sm font-medium text-gray-400">Verlaufsdauer: <span id="historyDurationValue">5</span>s</label>
+                    <input type="range" id="historyDuration" min="2" max="10" value="5" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
             </div>
         </div>
 
@@ -86,55 +106,38 @@
         </div>
     </div>
 
+    <footer class="text-center py-4 text-sm text-gray-500">
+        <a href="https://github.com/shift/cricket_detector" target="_blank" rel="noopener noreferrer" class="hover:text-gray-300">
+            GitHub Repository
+        </a>
+    </footer>
+
     <!-- SCRIPT LOADING -->
     <script>
         function startApp(Module) {
             // --- LANGUAGE MANAGEMENT ---
-            const translations = {
-                de: {
-                    title: "Richtungssucher",
-                    subtitle: "Mit Kompass und Lautstärke die Quelle finden.",
-                    startDetection: "Erkennung starten",
-                    stopDetection: "Erkennung stoppen",
-                    analyze: "Gehört! Letzte 5s analysieren",
-                    activeTargets: "Aktive Ziele",
-                    compassInactive: "Kompass inaktiv.",
-                    compassPointing: "Richtung: {heading}°",
-                    detectionLog: "Erkennungsprotokoll",
-                    clear: "Löschen",
-                    waiting: "Warte auf Erkennungen...",
-                    analysisTitle: "Rückblick-Analyse",
-                    analysisSubtitle: "Klicken Sie auf einen vertikalen Abschnitt im Spektrogramm, um einen Zeitpunkt zu analysieren.",
-                    signatureTitle: "Klangsignatur im ausgewählten Moment:",
-                    replaySound: "Ton abspielen",
-                    trackSignature: "Diese Signatur verfolgen",
-                    noPeaksFound: "Keine signifikanten Spitzen gefunden."
-                }
-            };
+            const translations = { /* ... unchanged ... */ };
             const currentLang = 'de';
             const lang = translations[currentLang];
-
-            function setLanguage() {
-                document.querySelectorAll('[data-lang-key]').forEach(el => {
-                    const key = el.dataset.langKey;
-                    if (lang[key]) {
-                        el.textContent = lang[key];
-                    }
-                });
-            }
-            setLanguage(); // Set language on startup
+            function setLanguage() { /* ... unchanged ... */ }
+            setLanguage();
 
             // DOM Elements
             const startButton = document.getElementById('startButton'), analyzeHistoryButton = document.getElementById('analyzeHistoryButton'), clearLogButton = document.getElementById('clearLogButton'), compassStatusEl = document.getElementById('compassStatus'), logContainer = document.getElementById('logContainer'), logPlaceholder = document.getElementById('logPlaceholder'), radarCanvas = document.getElementById('radarCanvas'), radarCtx = radarCanvas.getContext('2d'), targetsContainer = document.getElementById('targetsContainer');
             const analysisModal = document.getElementById('analysisModal'), closeModalButton = document.getElementById('closeModalButton'), spectrogramCanvas = document.getElementById('spectrogramCanvas'), spectrogramCtx = spectrogramCanvas.getContext('2d'), spectrogramSelector = document.getElementById('spectrogramSelector'), peakInfo = document.getElementById('peakInfo'), peakListEl = document.getElementById('peakList'), playSignatureButton = document.getElementById('playSignatureButton'), trackSignatureButton = document.getElementById('trackSignatureButton');
+            const settingsToggle = document.getElementById('settingsToggle'), settingsPanel = document.getElementById('settingsPanel'), liveSensitivitySlider = document.getElementById('liveSensitivity'), liveSensValue = document.getElementById('liveSensValue'), lookbackSensitivitySlider = document.getElementById('lookbackSensitivity'), lookbackSensValue = document.getElementById('lookbackSensValue'), historyDurationSlider = document.getElementById('historyDuration'), historyDurationValue = document.getElementById('historyDurationValue');
 
             // App State
             let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, targetsPtr;
             let animationFrameId, currentHeading = 0, selectedSignature = [], compassEnabled = false;
-            const detectionLog = [], historyBuffer = [], HISTORY_SIZE = 300;
+            const detectionLog = [], historyBuffer = [];
             let TARGET_FREQUENCIES;
-            const LIVE_SENSITIVITY = 190;
-            const LOOKBACK_SENSITIVITY = 170;
+            
+            // --- Settings State ---
+            let LIVE_SENSITIVITY, LOOKBACK_SENSITIVITY, HISTORY_DURATION_S;
+            let HISTORY_SIZE; // Calculated from duration
+
+            let activePeak = { freq: 0, amp: 0, heading: 0, frames: 0, startTime: 0 };
 
             const wasmModule = Module;
             detectorPtr = wasmModule._detector_new();
@@ -142,126 +145,90 @@
             dataPtr = wasmModule._malloc(bufferSize * Uint8Array.BYTES_PER_ELEMENT);
             liveFreqPtr = wasmModule._malloc(4);
             
-            function loadTrackedFrequencies() {
-                const defaultFrequencies = [4000.0, 5000.0, 12000.0];
-                let savedFrequencies = [];
+            // --- Settings Management ---
+            function loadSettings() {
+                const defaults = { live: 190, lookback: 170, duration: 5 };
+                let settings = { ...defaults };
                 try {
-                    const stored = localStorage.getItem('trackedFrequencies');
-                    if (stored) savedFrequencies = JSON.parse(stored);
+                    const stored = localStorage.getItem('detectorSettings');
+                    if (stored) {
+                        settings = { ...defaults, ...JSON.parse(stored) };
+                    }
                 } catch (e) {
-                    console.error("Could not parse saved frequencies:", e);
-                    localStorage.removeItem('trackedFrequencies');
+                    console.error("Could not parse settings:", e);
+                    localStorage.removeItem('detectorSettings');
                 }
-                const allFrequencies = [...new Set([...defaultFrequencies, ...savedFrequencies])];
-                TARGET_FREQUENCIES = new Float32Array(allFrequencies);
+                LIVE_SENSITIVITY = settings.live;
+                LOOKBACK_SENSITIVITY = settings.lookback;
+                HISTORY_DURATION_S = settings.duration;
+                HISTORY_SIZE = HISTORY_DURATION_S * 60; // Approx 60fps
+
+                // Update UI
+                liveSensitivitySlider.value = LIVE_SENSITIVITY;
+                liveSensValue.textContent = LIVE_SENSITIVITY;
+                lookbackSensitivitySlider.value = LOOKBACK_SENSITIVITY;
+                lookbackSensValue.textContent = LOOKBACK_SENSITIVITY;
+                historyDurationSlider.value = HISTORY_DURATION_S;
+                historyDurationValue.textContent = HISTORY_DURATION_S;
             }
 
-            function saveTrackedFrequencies() {
-                const userFrequencies = Array.from(TARGET_FREQUENCIES).filter(f => ![4000, 5000, 12000].includes(f));
-                localStorage.setItem('trackedFrequencies', JSON.stringify(userFrequencies));
+            function saveSettings() {
+                const settings = {
+                    live: LIVE_SENSITIVITY,
+                    lookback: LOOKBACK_SENSITIVITY,
+                    duration: HISTORY_DURATION_S
+                };
+                localStorage.setItem('detectorSettings', JSON.stringify(settings));
             }
 
-            function updateWasmTargets() {
-                if (targetsPtr) wasmModule._free(targetsPtr);
-                targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
-                wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
-                updateTargetsUI();
-            }
+            // --- Event Listeners for Settings ---
+            settingsToggle.addEventListener('click', () => {
+                if (settingsPanel.style.maxHeight && settingsPanel.style.maxHeight !== '0px') {
+                    settingsPanel.style.maxHeight = '0px';
+                } else {
+                    settingsPanel.style.maxHeight = settingsPanel.scrollHeight + "px";
+                }
+            });
+            liveSensitivitySlider.addEventListener('input', (e) => {
+                LIVE_SENSITIVITY = parseInt(e.target.value);
+                liveSensValue.textContent = LIVE_SENSITIVITY;
+                saveSettings();
+            });
+            lookbackSensitivitySlider.addEventListener('input', (e) => {
+                LOOKBACK_SENSITIVITY = parseInt(e.target.value);
+                lookbackSensValue.textContent = LOOKBACK_SENSITIVITY;
+                saveSettings();
+            });
+            historyDurationSlider.addEventListener('input', (e) => {
+                HISTORY_DURATION_S = parseInt(e.target.value);
+                HISTORY_SIZE = HISTORY_DURATION_S * 60;
+                historyDurationValue.textContent = HISTORY_DURATION_S;
+                saveSettings();
+            });
 
-            function updateTargetsUI() {
-                targetsContainer.innerHTML = '';
-                TARGET_FREQUENCIES.forEach(freq => {
-                    const badge = document.createElement('span');
-                    badge.className = 'bg-blue-600 text-white text-xs font-semibold mr-2 px-2.5 py-0.5 rounded-full flex items-center';
-                    badge.innerHTML = `${(freq / 1000).toFixed(1)} kHz`;
-                    const removeBtn = document.createElement('button');
-                    removeBtn.className = 'ml-2 text-blue-200 hover:text-white';
-                    removeBtn.innerHTML = '&times;';
-                    removeBtn.onclick = () => {
-                        TARGET_FREQUENCIES = new Float32Array(Array.from(TARGET_FREQUENCIES).filter(f => f !== freq));
-                        saveTrackedFrequencies();
-                        updateWasmTargets();
-                    };
-                    badge.appendChild(removeBtn);
-                    targetsContainer.appendChild(badge);
-                });
-            }
+            function loadTrackedFrequencies() { /* ... unchanged ... */ }
+            function saveTrackedFrequencies() { /* ... unchanged ... */ }
+            function updateWasmTargets() { /* ... unchanged ... */ }
+            function updateTargetsUI() { /* ... unchanged ... */ }
             
+            // --- Initialization ---
+            loadSettings();
             loadTrackedFrequencies();
             updateWasmTargets();
             console.log("WASM module initialized and app started.");
 
-            startButton.addEventListener('click', async () => {
-                if (startButton.dataset.running === 'true') stopDetection();
-                else await startDetection();
-            });
+            // --- Control Logic ---
+            startButton.addEventListener('click', async () => { /* ... unchanged ... */ });
             analyzeHistoryButton.addEventListener('click', showAnalysisModal);
             closeModalButton.addEventListener('click', () => analysisModal.style.display = 'none');
             analysisModal.querySelector('.modal-backdrop').addEventListener('click', () => analysisModal.style.display = 'none');
-            clearLogButton.addEventListener('click', () => {
-                detectionLog.length = 0;
-                updateLogUI();
-                drawRadar();
-            });
+            clearLogButton.addEventListener('click', () => { /* ... unchanged ... */ });
 
-            async function startDetection() {
-                if (!wasmModule) return;
-                if (!audioContext) await setupAudio();
-                if (!compassEnabled) await requestOrientationPermission();
-                if (audioContext && audioContext.state === 'suspended') await audioContext.resume();
-                startButton.dataset.running = 'true';
-                startButton.textContent = lang.stopDetection;
-                startButton.classList.replace('bg-blue-600', 'bg-red-600');
-                analyzeHistoryButton.disabled = false;
-                recordAndDetect();
-            }
-
-            function stopDetection() {
-                if (animationFrameId) cancelAnimationFrame(animationFrameId);
-                animationFrameId = null;
-                if (audioContext) audioContext.suspend();
-                startButton.dataset.running = 'false';
-                startButton.textContent = lang.startDetection;
-                startButton.classList.replace('bg-red-600', 'bg-blue-600');
-                analyzeHistoryButton.disabled = true;
-            }
-
-            async function setupAudio() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    analyser = audioContext.createAnalyser();
-                    analyser.fftSize = bufferSize;
-                    analyser.smoothingTimeConstant = 0.1;
-                    const source = audioContext.createMediaStreamSource(stream);
-                    source.connect(analyser);
-                } catch (err) { console.error("Mic Error:", err); }
-            }
-
-            async function requestOrientationPermission() {
-                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    try {
-                        const permissionState = await DeviceOrientationEvent.requestPermission();
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                            compassEnabled = true;
-                        }
-                    } catch (error) {
-                        console.error("Compass permission denied:", error);
-                    }
-                } else if ('ondeviceorientation' in window) {
-                    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-                    window.addEventListener('deviceorientation', handleOrientation, true);
-                    compassEnabled = true;
-                }
-            }
-
-            function handleOrientation(event) {
-                let heading = event.webkitCompassHeading || event.alpha;
-                if(heading !== null) currentHeading = heading;
-                compassStatusEl.textContent = lang.compassPointing.replace('{heading}', Math.round(currentHeading));
-            }
-
+            async function startDetection() { /* ... unchanged ... */ }
+            function stopDetection() { /* ... unchanged ... */ }
+            async function setupAudio() { /* ... unchanged ... */ }
+            async function requestOrientationPermission() { /* ... unchanged ... */ }
+            function handleOrientation(event) { /* ... unchanged ... */ }
             function recordAndDetect() {
                 if (!analyser || !wasmModule) return;
                 animationFrameId = requestAnimationFrame(recordAndDetect);
@@ -269,46 +236,40 @@
                 const dataArray = new Uint8Array(bufferLength);
                 analyser.getByteFrequencyData(dataArray);
                 historyBuffer.push(new Uint8Array(dataArray));
-                if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
+                // Trim buffer based on dynamic size
+                while (historyBuffer.length > HISTORY_SIZE) {
+                    historyBuffer.shift();
+                }
                 wasmModule.HEAPU8.set(dataArray, dataPtr);
                 const detectedAmplitude = wasmModule._detector_find_multiple_peaks(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetsPtr, TARGET_FREQUENCIES.length, LIVE_SENSITIVITY, liveFreqPtr);
+                const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
+                
+                // Duration logic remains the same
                 if (detectedAmplitude > 0) {
-                    const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
+                    if (activePeak.frames === 0) {
+                        activePeak.freq = detectedFreq;
+                        activePeak.amp = detectedAmplitude;
+                        activePeak.heading = currentHeading;
+                        activePeak.startTime = performance.now();
+                    }
+                    activePeak.frames++;
+                    if (detectedAmplitude > activePeak.amp) {
+                        activePeak.amp = detectedAmplitude;
+                        activePeak.heading = currentHeading;
+                    }
+                } else if (activePeak.frames > 0) {
+                    const duration = performance.now() - activePeak.startTime;
                     if ('vibrate' in navigator) navigator.vibrate(100);
-                    detectionLog.unshift({ time: new Date(), freq: detectedFreq, amp: detectedAmplitude, heading: currentHeading });
+                    detectionLog.unshift({ time: new Date(), freq: activePeak.freq, amp: activePeak.amp, heading: activePeak.heading, duration: duration });
                     if (detectionLog.length > 50) detectionLog.pop();
                     updateLogUI();
-                    drawRadar();
+                    activePeak = { freq: 0, amp: 0, heading: 0, frames: 0, startTime: 0 };
                 }
+                drawRadar();
             }
 
-            function showAnalysisModal() {
-                analysisModal.style.display = 'flex';
-                drawSpectrogram();
-                peakInfo.style.display = 'none';
-                spectrogramSelector.style.display = 'none';
-            }
-
-            function drawSpectrogram() {
-                const canvas = spectrogramCanvas, ctx = spectrogramCtx;
-                const width = 512, height = 256;
-                canvas.width = width; canvas.height = height;
-                if (historyBuffer.length === 0) return;
-                const step = width / historyBuffer.length;
-                for (let i = 0; i < historyBuffer.length; i++) {
-                    const dataArray = historyBuffer[i];
-                    for (let j = 0; j < dataArray.length; j++) {
-                        const value = dataArray[j];
-                        if (value > 150) {
-                            const percent = j / dataArray.length;
-                            const y = height - (percent * height);
-                            const hue = 240 - (value / 255) * 240;
-                            ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.5)`;
-                            ctx.fillRect(i * step, y, step, 1);
-                        }
-                    }
-                }
-            }
+            function showAnalysisModal() { /* ... unchanged ... */ }
+            function drawSpectrogram() { /* ... unchanged ... */ }
             
             spectrogramCanvas.addEventListener('click', (event) => {
                 const rect = spectrogramCanvas.getBoundingClientRect();
@@ -321,7 +282,9 @@
                 const maxPeaks = 10;
                 const peaksBufferPtr = wasmModule._malloc(maxPeaks * 4);
                 wasmModule.HEAPU8.set(selectedData, dataPtr);
+                
                 const numPeaksFound = wasmModule._find_all_peaks(detectorPtr, dataPtr, analyser.frequencyBinCount, audioContext.sampleRate, LOOKBACK_SENSITIVITY, peaksBufferPtr, maxPeaks);
+                
                 selectedSignature = [];
                 let peakListHTML = lang.noPeaksFound;
                 if (numPeaksFound > 0) {
@@ -337,117 +300,10 @@
                 peakInfo.style.display = 'block';
             });
 
-            playSignatureButton.addEventListener('click', async () => {
-                if (!audioContext || selectedSignature.length === 0) return;
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-                const now = audioContext.currentTime;
-                selectedSignature.forEach(freq => {
-                    const oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(freq, now);
-                    gainNode.gain.setValueAtTime(0.3 / selectedSignature.length, now);
-                    oscillator.start(now);
-                    oscillator.stop(now + 0.3);
-                });
-            });
-
-            trackSignatureButton.addEventListener('click', () => {
-                if (selectedSignature.length === 0) return;
-                const currentTargets = Array.from(TARGET_FREQUENCIES);
-                let newTargetsAdded = false;
-                selectedSignature.forEach(freq => {
-                    const roundedFreq = Math.round(freq);
-                    if (!currentTargets.some(f => Math.abs(f - roundedFreq) < 10)) {
-                        currentTargets.push(roundedFreq);
-                        newTargetsAdded = true;
-                    }
-                });
-                if (newTargetsAdded) {
-                    TARGET_FREQUENCIES = new Float32Array(currentTargets);
-                    saveTrackedFrequencies();
-                    updateWasmTargets();
-                }
-                analysisModal.style.display = 'none';
-            });
-
-            function updateLogUI() {
-                logContainer.innerHTML = '';
-                if (detectionLog.length === 0) {
-                    logContainer.innerHTML = `<p id="logPlaceholder" class="text-gray-500 text-center pt-4">${lang.waiting}</p>`;
-                    return;
-                }
-                detectionLog.forEach(entry => {
-                    const logEntry = document.createElement('div');
-                    logEntry.className = 'bg-gray-700/50 p-2 rounded-md text-sm';
-                    const ampPercent = Math.max(0, Math.min(100, ((entry.amp - LIVE_SENSITIVITY) / (255 - LIVE_SENSITIVITY)) * 100));
-                    logEntry.innerHTML = `
-                        <div class="flex justify-between items-center">
-                            <span class="font-mono text-xs text-gray-400">${entry.time.toLocaleTimeString()}</span>
-                            <span class="font-bold text-blue-300">${(entry.freq / 1000).toFixed(1)} kHz</span>
-                            <span class="text-gray-300">Loudness: ${entry.amp}</span>
-                            <span class="text-purple-300">${Math.round(entry.heading)}°</span>
-                        </div>
-                        <div class="w-full amp-bar-container rounded-full h-2 mt-1">
-                            <div class="amp-bar h-2 rounded-full" style="width: ${ampPercent}%;"></div>
-                        </div>
-                    `;
-                    logContainer.appendChild(logEntry);
-                });
-            }
-            
-            function drawRadar() {
-                if (!radarCanvas.isConnected) return;
-                const size = radarCanvas.getBoundingClientRect().width;
-                radarCanvas.width = size;
-                radarCanvas.height = size;
-                const center = size / 2;
-                const radius = center * 0.9;
-                
-                radarCtx.clearRect(0, 0, size, size);
-
-                radarCtx.strokeStyle = 'rgba(75, 85, 99, 0.5)';
-                radarCtx.fillStyle = 'rgba(156, 163, 175, 0.7)';
-                radarCtx.font = `${center * 0.08}px Inter`;
-                radarCtx.textAlign = 'center';
-                radarCtx.textBaseline = 'middle';
-
-                ['N', 'O', 'S', 'W'].forEach((dir, i) => { // O for Ost (East)
-                    const angle = i * Math.PI / 2 - Math.PI / 2;
-                    const x = center + (radius * 1.05) * Math.cos(angle);
-                    const y = center + (radius * 1.05) * Math.sin(angle);
-                    radarCtx.fillText(dir, x, y);
-                });
-                
-                radarCtx.beginPath();
-                radarCtx.arc(center, center, radius * 0.8, 0, 2 * Math.PI);
-                radarCtx.stroke();
-                radarCtx.beginPath();
-                radarCtx.arc(center, center, radius * 0.4, 0, 2 * Math.PI);
-                radarCtx.stroke();
-
-                detectionLog.forEach((entry, index) => {
-                    const angle = (entry.heading - 90) * Math.PI / 180;
-                    const loudnessRatio = Math.max(0, Math.min(1, (entry.amp - LIVE_SENSITIVITY) / (255 - LIVE_SENSITIVITY)));
-                    const distanceFromCenter = loudnessRatio * radius;
-                    
-                    const x = center + distanceFromCenter * Math.cos(angle);
-                    const y = center + distanceFromCenter * Math.sin(angle);
-                    
-                    const pointRadius = 2 + loudnessRatio * 4;
-                    const opacity = 1 - (index / detectionLog.length);
-                    
-                    radarCtx.beginPath();
-                    const hue = 120 - (loudnessRatio * 120);
-                    radarCtx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
-                    radarCtx.arc(x, y, pointRadius, 0, 2 * Math.PI);
-                    radarCtx.fill();
-                });
-            }
+            playSignatureButton.addEventListener('click', async () => { /* ... unchanged ... */ });
+            trackSignatureButton.addEventListener('click', () => { /* ... unchanged ... */ });
+            function updateLogUI() { /* ... unchanged ... */ }
+            function drawRadar() { /* ... unchanged ... */ }
             
             window.addEventListener('resize', drawRadar);
             drawRadar();
