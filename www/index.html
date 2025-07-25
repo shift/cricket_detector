@@ -143,7 +143,9 @@
                     signatureTitle: "Klangsignatur im ausgewählten Moment:",
                     replaySound: "Ton abspielen",
                     trackSignature: "Diese Signatur verfolgen",
-                    noPeaksFound: "Keine signifikanten Spitzen gefunden."
+                    noPeaksFound: "Keine signifikanten Spitzen gefunden.",
+                    micPermission: "Mikrofonberechtigung verweigert. Bitte in den Browsereinstellungen erlauben.",
+                    micError: "Mikrofon konnte nicht initialisiert werden."
                 },
                 en: {
                     title: "Directional Detector",
@@ -166,7 +168,9 @@
                     signatureTitle: "Sound Signature at Selected Moment:",
                     replaySound: "Replay Sound",
                     trackSignature: "Track this Signature",
-                    noPeaksFound: "No significant peaks found."
+                    noPeaksFound: "No significant peaks found.",
+                    micPermission: "Microphone permission denied. Please allow in browser settings.",
+                    micError: "Could not initialize microphone."
                 }
             };
             let currentLang = localStorage.getItem('detectorLang') || 'de';
@@ -329,10 +333,10 @@
 
                 // 1. Ensure Audio is ready. This must succeed.
                 if (!audioContext) {
-                    await setupAudio();
-                    if (!audioContext) {
+                    const audioReady = await setupAudio();
+                    if (!audioReady) {
                         console.log("Audio setup failed. Cannot start detection.");
-                        return; // Exit if user denied permission
+                        return; // Exit if setup failed (user was already notified)
                     }
                 }
                 
@@ -354,7 +358,28 @@
             }
 
             function stopDetection() { /* ... unchanged ... */ }
-            async function setupAudio() { /* ... unchanged ... */ }
+            
+            async function setupAudio() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = bufferSize;
+                    analyser.smoothingTimeConstant = 0.1;
+                    const source = audioContext.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                    return true; // Indicate success
+                } catch (err) {
+                    console.error("Mic Error:", err);
+                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                        compassStatusEl.textContent = translations[currentLang].micPermission;
+                    } else {
+                        compassStatusEl.textContent = translations[currentLang].micError;
+                    }
+                    return false; // Indicate failure
+                }
+            }
+
             async function requestOrientationPermission() { /* ... unchanged ... */ }
             function handleOrientation(event) {
                 let heading = event.webkitCompassHeading || event.alpha;
