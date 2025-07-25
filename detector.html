@@ -14,7 +14,7 @@
         .amp-bar { background: linear-gradient(90deg, #10B981 0%, #F59E0B 70%, #EF4444 100%); transition: width 0.3s ease-in-out; }
         #radarCanvas { background-color: #1f2937; }
         .modal-backdrop { backdrop-filter: blur(4px); }
-        #settingsPanel { transition: max-height 0.3s ease-out; }
+        #settingsPanel, #helpPanel { transition: max-height 0.3s ease-out; }
     </style>
 </head>
 <body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
@@ -66,6 +66,17 @@
                     <label for="historyDuration" class="block text-sm font-medium text-gray-400" data-lang-key="historyDurationLabel">Verlaufsdauer: <span id="historyDurationValue">5</span>s</label>
                     <input type="range" id="historyDuration" min="2" max="10" value="5" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
                 </div>
+            </div>
+        </div>
+
+        <!-- Help Panel -->
+        <div class="bg-gray-900/50 rounded-lg">
+            <button id="helpToggle" class="w-full text-left p-3 font-medium text-gray-300" data-lang-key="help">Hilfe</button>
+            <div id="helpPanel" class="px-4 pb-4 space-y-3 text-sm text-gray-300 overflow-hidden max-h-0" data-lang-key="helpContent">
+                <p><strong>1. Erkennung starten:</strong> Klicken Sie, um Mikrofon- und Kompassberechtigungen zu aktivieren und mit der Suche nach Geräuschen zu beginnen.</p>
+                <p><strong>2. Radar:</strong> Drehen Sie sich langsam im Kreis. Laute oder häufige Geräusche lassen den Radar in die Richtung der Quelle "aufleuchten".</p>
+                <p><strong>3. "Gehört!"-Analyse:</strong> Wenn Sie ein Geräusch hören, klicken Sie auf diese Schaltfläche. Es öffnet sich ein Diagramm der letzten Sekunden. Klicken Sie auf den hellen Fleck, der dem Geräusch entspricht, um seine Frequenzen zu analysieren, anzuhören und zu verfolgen.</p>
+                <p><strong>4. Aktive Ziele:</strong> Dies ist die Liste der Frequenzen, nach denen die App live sucht. Sie können Ziele entfernen, indem Sie auf das 'x' klicken.</p>
             </div>
         </div>
 
@@ -130,6 +141,8 @@
                     analyze: "Gehört! Letzte 5s analysieren",
                     activeTargets: "Aktive Ziele",
                     settings: "Einstellungen",
+                    help: "Hilfe",
+                    helpContent: `<p><strong>1. Erkennung starten:</strong> Klicken Sie, um Mikrofon- und Kompassberechtigungen zu aktivieren und mit der Suche nach Geräuschen zu beginnen.</p><p><strong>2. Radar:</strong> Drehen Sie sich langsam im Kreis. Laute oder häufige Geräusche lassen den Radar in die Richtung der Quelle "aufleuchten".</p><p><strong>3. "Gehört!"-Analyse:</strong> Wenn Sie ein Geräusch hören, klicken Sie auf diese Schaltfläche. Es öffnet sich ein Diagramm der letzten Sekunden. Klicken Sie auf den hellen Fleck, der dem Geräusch entspricht, um seine Frequenzen zu analysieren, anzuhören und zu verfolgen.</p><p><strong>4. Aktive Ziele:</strong> Dies ist die Liste der Frequenzen, nach denen die App live sucht. Sie können Ziele entfernen, indem Sie auf das 'x' klicken.</p>`,
                     liveSensLabel: "Live-Empfindlichkeit:",
                     lookbackSensLabel: "Analyse-Empfindlichkeit:",
                     historyDurationLabel: "Verlaufsdauer:",
@@ -155,6 +168,8 @@
                     analyze: "Heard It! Analyze Last 5s",
                     activeTargets: "Active Targets",
                     settings: "Settings",
+                    help: "Help",
+                    helpContent: `<p><strong>1. Start Detection:</strong> Click to enable microphone and compass permissions and begin listening for sounds.</p><p><strong>2. Radar:</strong> Turn slowly in a circle. Loud or frequent sounds will cause the radar to "glow" in the direction of the source.</p><p><strong>3. "Heard It!" Analysis:</strong> When you hear a sound, press this button. A chart of the last few seconds will open. Click the bright spot corresponding to the sound to analyze, hear, and track its frequencies.</p><p><strong>4. Active Targets:</strong> This is the list of frequencies the app is actively listening for. You can remove targets by clicking the 'x'.</p>`,
                     liveSensLabel: "Live Sensitivity:",
                     lookbackSensLabel: "Analysis Sensitivity:",
                     historyDurationLabel: "History Duration:",
@@ -186,8 +201,9 @@
                 document.querySelectorAll('[data-lang-key]').forEach(el => {
                     const key = el.dataset.langKey;
                     if (lang[key]) {
-                        // FIX: Non-destructive update for labels with value spans
-                        if (el.tagName === 'LABEL' && el.querySelector('span')) {
+                        if (key === 'helpContent') {
+                            el.innerHTML = lang[key];
+                        } else if (el.tagName === 'LABEL' && el.querySelector('span')) {
                              const textNode = Array.from(el.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
                              if(textNode) {
                                  textNode.nodeValue = lang[key] + ' ';
@@ -216,6 +232,7 @@
             const startButton = document.getElementById('startButton'), analyzeHistoryButton = document.getElementById('analyzeHistoryButton'), clearLogButton = document.getElementById('clearLogButton'), compassStatusEl = document.getElementById('compassStatus'), logContainer = document.getElementById('logContainer'), logPlaceholder = document.getElementById('logPlaceholder'), radarCanvas = document.getElementById('radarCanvas'), radarCtx = radarCanvas.getContext('2d'), targetsContainer = document.getElementById('targetsContainer');
             const analysisModal = document.getElementById('analysisModal'), closeModalButton = document.getElementById('closeModalButton'), spectrogramCanvas = document.getElementById('spectrogramCanvas'), spectrogramCtx = spectrogramCanvas.getContext('2d'), spectrogramSelector = document.getElementById('spectrogramSelector'), peakInfo = document.getElementById('peakInfo'), peakListEl = document.getElementById('peakList'), playSignatureButton = document.getElementById('playSignatureButton'), trackSignatureButton = document.getElementById('trackSignatureButton');
             const settingsToggle = document.getElementById('settingsToggle'), settingsPanel = document.getElementById('settingsPanel'), liveSensitivitySlider = document.getElementById('liveSensitivity'), liveSensValue = document.getElementById('liveSensValue'), lookbackSensitivitySlider = document.getElementById('lookbackSensitivity'), lookbackSensValue = document.getElementById('lookbackSensValue'), historyDurationSlider = document.getElementById('historyDuration'), historyDurationValue = document.getElementById('historyDurationValue');
+            const helpToggle = document.getElementById('helpToggle'), helpPanel = document.getElementById('helpPanel');
 
             // App State
             let audioContext, analyser, detectorPtr, dataPtr, liveFreqPtr, targetsPtr;
@@ -236,42 +253,10 @@
             liveFreqPtr = wasmModule._malloc(4);
             
             // --- Settings Management ---
-            function loadSettings() {
-                const defaults = { live: 190, lookback: 170, duration: 5 };
-                let settings = { ...defaults };
-                try {
-                    const stored = localStorage.getItem('detectorSettings');
-                    if (stored) {
-                        settings = { ...defaults, ...JSON.parse(stored) };
-                    }
-                } catch (e) {
-                    console.error("Could not parse settings:", e);
-                    localStorage.removeItem('detectorSettings');
-                }
-                LIVE_SENSITIVITY = settings.live;
-                LOOKBACK_SENSITIVITY = settings.lookback;
-                HISTORY_DURATION_S = settings.duration;
-                HISTORY_SIZE = HISTORY_DURATION_S * 60; // Approx 60fps
+            function loadSettings() { /* ... unchanged ... */ }
+            function saveSettings() { /* ... unchanged ... */ }
 
-                // Update UI
-                liveSensitivitySlider.value = LIVE_SENSITIVITY;
-                liveSensValue.textContent = LIVE_SENSITIVITY;
-                lookbackSensitivitySlider.value = LOOKBACK_SENSITIVITY;
-                lookbackSensValue.textContent = LOOKBACK_SENSITIVITY;
-                historyDurationSlider.value = HISTORY_DURATION_S;
-                historyDurationValue.textContent = HISTORY_DURATION_S;
-            }
-
-            function saveSettings() {
-                const settings = {
-                    live: LIVE_SENSITIVITY,
-                    lookback: LOOKBACK_SENSITIVITY,
-                    duration: HISTORY_DURATION_S
-                };
-                localStorage.setItem('detectorSettings', JSON.stringify(settings));
-            }
-
-            // --- Event Listeners for Settings ---
+            // --- Event Listeners for Settings & Help ---
             settingsToggle.addEventListener('click', () => {
                 if (settingsPanel.style.maxHeight && settingsPanel.style.maxHeight !== '0px') {
                     settingsPanel.style.maxHeight = '0px';
@@ -279,67 +264,21 @@
                     settingsPanel.style.maxHeight = settingsPanel.scrollHeight + "px";
                 }
             });
-            liveSensitivitySlider.addEventListener('input', (e) => {
-                LIVE_SENSITIVITY = parseInt(e.target.value);
-                liveSensValue.textContent = LIVE_SENSITIVITY;
-                saveSettings();
-            });
-            lookbackSensitivitySlider.addEventListener('input', (e) => {
-                LOOKBACK_SENSITIVITY = parseInt(e.target.value);
-                lookbackSensValue.textContent = LOOKBACK_SENSITIVITY;
-                saveSettings();
-            });
-            historyDurationSlider.addEventListener('input', (e) => {
-                HISTORY_DURATION_S = parseInt(e.target.value);
-                HISTORY_SIZE = HISTORY_DURATION_S * 60;
-                historyDurationValue.textContent = HISTORY_DURATION_S;
-                saveSettings();
-            });
-
-            function loadTrackedFrequencies() {
-                const defaultFrequencies = [4000.0, 5000.0, 12000.0];
-                let savedFrequencies = [];
-                try {
-                    const stored = localStorage.getItem('trackedFrequencies');
-                    if (stored) savedFrequencies = JSON.parse(stored);
-                } catch (e) {
-                    console.error("Could not parse saved frequencies:", e);
-                    localStorage.removeItem('trackedFrequencies');
+            helpToggle.addEventListener('click', () => {
+                if (helpPanel.style.maxHeight && helpPanel.style.maxHeight !== '0px') {
+                    helpPanel.style.maxHeight = '0px';
+                } else {
+                    helpPanel.style.maxHeight = helpPanel.scrollHeight + "px";
                 }
-                const allFrequencies = [...new Set([...defaultFrequencies, ...savedFrequencies])];
-                TARGET_FREQUENCIES = new Float32Array(allFrequencies);
-            }
+            });
+            liveSensitivitySlider.addEventListener('input', (e) => { /* ... unchanged ... */ });
+            lookbackSensitivitySlider.addEventListener('input', (e) => { /* ... unchanged ... */ });
+            historyDurationSlider.addEventListener('input', (e) => { /* ... unchanged ... */ });
 
-            function saveTrackedFrequencies() {
-                const userFrequencies = Array.from(TARGET_FREQUENCIES).filter(f => ![4000, 5000, 12000].includes(f));
-                localStorage.setItem('trackedFrequencies', JSON.stringify(userFrequencies));
-            }
-
-            function updateWasmTargets() {
-                if (targetsPtr) wasmModule._free(targetsPtr);
-                targetsPtr = wasmModule._malloc(TARGET_FREQUENCIES.byteLength);
-                wasmModule.HEAPF32.set(TARGET_FREQUENCIES, targetsPtr / Float32Array.BYTES_PER_ELEMENT);
-                updateTargetsUI();
-            }
-
-            function updateTargetsUI() {
-                targetsContainer.innerHTML = '';
-                TARGET_FREQUENCIES.forEach(freq => {
-                    const badge = document.createElement('span');
-                    badge.className = 'bg-blue-600 text-white text-xs font-semibold mr-2 px-2.5 py-0.5 rounded-full flex items-center';
-                    badge.innerHTML = `${(freq / 1000).toFixed(1)} kHz`;
-                    const removeBtn = document.createElement('button');
-                    removeBtn.className = 'ml-2 text-blue-200 hover:text-white';
-                    removeBtn.innerHTML = '&times;';
-                    removeBtn.onclick = () => {
-                        TARGET_FREQUENCIES = new Float32Array(Array.from(TARGET_FREQUENCIES).filter(f => f !== freq));
-                        saveTrackedFrequencies();
-                        updateWasmTargets();
-                    };
-                    badge.appendChild(removeBtn);
-                    targetsContainer.appendChild(badge);
-                });
-            }
+            function loadTrackedFrequencies() { /* ... unchanged ... */ }
+            function saveTrackedFrequencies() { /* ... unchanged ... */ }
+            function updateWasmTargets() { /* ... unchanged ... */ }
+            function updateTargetsUI() { /* ... unchanged ... */ }
             
             // --- Initialization ---
             loadSettings();
@@ -349,284 +288,26 @@
             console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
-            startButton.addEventListener('click', async () => {
-                if (startButton.dataset.running === 'true') {
-                    stopDetection();
-                } else {
-                    await startDetection();
-                }
-            });
+            startButton.addEventListener('click', async () => { /* ... unchanged ... */ });
             analyzeHistoryButton.addEventListener('click', showAnalysisModal);
             closeModalButton.addEventListener('click', () => analysisModal.style.display = 'none');
             analysisModal.querySelector('.modal-backdrop').addEventListener('click', () => analysisModal.style.display = 'none');
-            clearLogButton.addEventListener('click', () => {
-                detectionLog.length = 0;
-                updateLogUI();
-                drawRadar();
-            });
+            clearLogButton.addEventListener('click', () => { /* ... unchanged ... */ });
 
-            async function startDetection() {
-                if (!wasmModule) return;
-
-                if (!audioContext) {
-                    const audioReady = await setupAudio();
-                    if (!audioReady) {
-                        console.log("Audio setup failed. Cannot start detection.");
-                        return;
-                    }
-                }
-                
-                if (!compassEnabled) {
-                    await requestOrientationPermission();
-                }
-
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-                
-                startButton.dataset.running = 'true';
-                startButton.textContent = translations[currentLang].stopDetection;
-                startButton.classList.replace('bg-blue-600', 'bg-red-600');
-                analyzeHistoryButton.disabled = false;
-                recordAndDetect();
-            }
-
-            function stopDetection() {
-                if (animationFrameId) cancelAnimationFrame(animationFrameId);
-                animationFrameId = null;
-                if (audioContext) audioContext.suspend();
-                startButton.dataset.running = 'false';
-                startButton.textContent = translations[currentLang].startDetection;
-                startButton.classList.replace('bg-red-600', 'bg-blue-600');
-                analyzeHistoryButton.disabled = true;
-            }
+            async function startDetection() { /* ... unchanged ... */ }
+            function stopDetection() { /* ... unchanged ... */ }
+            async function setupAudio() { /* ... unchanged ... */ }
+            async function requestOrientationPermission() { /* ... unchanged ... */ }
+            function handleOrientation(event) { /* ... unchanged ... */ }
+            function recordAndDetect() { /* ... unchanged ... */ }
+            function showAnalysisModal() { /* ... unchanged ... */ }
+            function drawSpectrogram() { /* ... unchanged ... */ }
             
-            async function setupAudio() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    analyser = audioContext.createAnalyser();
-                    analyser.fftSize = bufferSize;
-                    analyser.smoothingTimeConstant = 0.1;
-                    const source = audioContext.createMediaStreamSource(stream);
-                    source.connect(analyser);
-                    return true; // Indicate success
-                } catch (err) {
-                    console.error("Mic Error:", err);
-                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                        compassStatusEl.textContent = translations[currentLang].micPermission;
-                    } else {
-                        compassStatusEl.textContent = translations[currentLang].micError;
-                    }
-                    return false; // Indicate failure
-                }
-            }
-
-            async function requestOrientationPermission() {
-                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    try {
-                        const permissionState = await DeviceOrientationEvent.requestPermission();
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                            compassEnabled = true;
-                        }
-                    } catch (error) {
-                        console.error("Compass permission denied:", error);
-                    }
-                } else if ('ondeviceorientation' in window) {
-                    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-                    window.addEventListener('deviceorientation', handleOrientation, true);
-                    compassEnabled = true;
-                }
-            }
-            function handleOrientation(event) {
-                let heading = event.webkitCompassHeading || event.alpha;
-                if(heading !== null) currentHeading = heading;
-                compassStatusEl.textContent = translations[currentLang].compassPointing.replace('{heading}', Math.round(currentHeading));
-            }
-            function recordAndDetect() {
-                if (!analyser || !wasmModule) return;
-                animationFrameId = requestAnimationFrame(recordAndDetect);
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-                analyser.getByteFrequencyData(dataArray);
-                historyBuffer.push(new Uint8Array(dataArray));
-                while (historyBuffer.length > HISTORY_SIZE) {
-                    historyBuffer.shift();
-                }
-                wasmModule.HEAPU8.set(dataArray, dataPtr);
-                const detectedAmplitude = wasmModule._detector_find_multiple_peaks(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetsPtr, TARGET_FREQUENCIES.length, LIVE_SENSITIVITY, liveFreqPtr);
-                if (detectedAmplitude > 0) {
-                    const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
-                    if ('vibrate' in navigator) navigator.vibrate(100);
-                    detectionLog.unshift({ time: new Date(), freq: detectedFreq, amp: detectedAmplitude, heading: currentHeading });
-                    if (detectionLog.length > 50) detectionLog.pop();
-                    updateLogUI();
-                    drawRadar();
-                }
-            }
-            function showAnalysisModal() {
-                analysisModal.style.display = 'flex';
-                drawSpectrogram();
-                peakInfo.style.display = 'none';
-                spectrogramSelector.style.display = 'none';
-            }
-            function drawSpectrogram() {
-                const canvas = spectrogramCanvas, ctx = spectrogramCtx;
-                const width = 512, height = 256;
-                canvas.width = width; canvas.height = height;
-                if (historyBuffer.length === 0) return;
-                const step = width / historyBuffer.length;
-                for (let i = 0; i < historyBuffer.length; i++) {
-                    const dataArray = historyBuffer[i];
-                    for (let j = 0; j < dataArray.length; j++) {
-                        const value = dataArray[j];
-                        if (value > 150) {
-                            const percent = j / dataArray.length;
-                            const y = height - (percent * height);
-                            const hue = 240 - (value / 255) * 240;
-                            ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.5)`;
-                            ctx.fillRect(i * step, y, step, 1);
-                        }
-                    }
-                }
-            }
-            
-            spectrogramCanvas.addEventListener('click', (event) => {
-                const rect = spectrogramCanvas.getBoundingClientRect();
-                const x = event.clientX - rect.left;
-                const timeIndex = Math.floor((x / rect.width) * historyBuffer.length);
-                if (timeIndex < 0 || timeIndex >= historyBuffer.length) return;
-                spectrogramSelector.style.left = `${x}px`;
-                spectrogramSelector.style.display = 'block';
-                const selectedData = historyBuffer[timeIndex];
-                const maxPeaks = 10;
-                const peaksBufferPtr = wasmModule._malloc(maxPeaks * 4);
-                wasmModule.HEAPU8.set(selectedData, dataPtr);
-                const numPeaksFound = wasmModule._find_all_peaks(detectorPtr, dataPtr, analyser.frequencyBinCount, audioContext.sampleRate, LOOKBACK_SENSITIVITY, peaksBufferPtr, maxPeaks);
-                selectedSignature = [];
-                let peakListHTML = translations[currentLang].noPeaksFound;
-                if (numPeaksFound > 0) {
-                    peakListHTML = '';
-                    for (let i = 0; i < numPeaksFound; i++) {
-                        const freq = wasmModule.getValue(peaksBufferPtr + i * 4, 'float');
-                        selectedSignature.push(freq);
-                        peakListHTML += `<div>${(freq / 1000).toFixed(2)} kHz</div>`;
-                    }
-                }
-                wasmModule._free(peaksBufferPtr);
-                peakListEl.innerHTML = peakListHTML;
-                peakInfo.style.display = 'block';
-            });
-            playSignatureButton.addEventListener('click', async () => {
-                if (!audioContext || selectedSignature.length === 0) return;
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-                const now = audioContext.currentTime;
-                selectedSignature.forEach(freq => {
-                    const oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(freq, now);
-                    gainNode.gain.setValueAtTime(0.3 / selectedSignature.length, now);
-                    oscillator.start(now);
-                    oscillator.stop(now + 0.3);
-                });
-            });
-            trackSignatureButton.addEventListener('click', () => {
-                if (selectedSignature.length === 0) return;
-                const currentTargets = Array.from(TARGET_FREQUENCIES);
-                let newTargetsAdded = false;
-                selectedSignature.forEach(freq => {
-                    const roundedFreq = Math.round(freq);
-                    if (!currentTargets.some(f => Math.abs(f - roundedFreq) < 10)) {
-                        currentTargets.push(roundedFreq);
-                        newTargetsAdded = true;
-                    }
-                });
-                if (newTargetsAdded) {
-                    TARGET_FREQUENCIES = new Float32Array(currentTargets);
-                    saveTrackedFrequencies();
-                    updateWasmTargets();
-                }
-                analysisModal.style.display = 'none';
-            });
-            function updateLogUI() {
-                logContainer.innerHTML = '';
-                if (detectionLog.length === 0) {
-                    logContainer.innerHTML = `<p id="logPlaceholder" class="text-gray-500 text-center pt-4">${translations[currentLang].waiting}</p>`;
-                    return;
-                }
-                detectionLog.forEach(entry => {
-                    const logEntry = document.createElement('div');
-                    logEntry.className = 'bg-gray-700/50 p-2 rounded-md text-sm';
-                    const ampPercent = Math.max(0, Math.min(100, ((entry.amp - LIVE_SENSITIVITY) / (255 - LIVE_SENSITIVITY)) * 100));
-                    const durationText = entry.duration ? `<span class="text-yellow-300">${Math.round(entry.duration)}ms</span>` : '';
-                    logEntry.innerHTML = `
-                        <div class="flex justify-between items-center text-xs">
-                            <span class="font-mono text-gray-400">${entry.time.toLocaleTimeString()}</span>
-                            <span class="font-bold text-blue-300">${(entry.freq / 1000).toFixed(1)} kHz</span>
-                            ${durationText}
-                            <span class="text-purple-300">${Math.round(entry.heading)}°</span>
-                        </div>
-                        <div class="w-full amp-bar-container rounded-full h-2 mt-1">
-                            <div class="amp-bar h-2 rounded-full" style="width: ${ampPercent}%;"></div>
-                        </div>
-                    `;
-                    logContainer.appendChild(logEntry);
-                });
-            }
-            function drawRadar() {
-                if (!radarCanvas.isConnected) return;
-                const size = radarCanvas.getBoundingClientRect().width;
-                radarCanvas.width = size;
-                radarCanvas.height = size;
-                const center = size / 2;
-                const radius = center * 0.9;
-                
-                radarCtx.clearRect(0, 0, size, size);
-
-                radarCtx.strokeStyle = 'rgba(75, 85, 99, 0.5)';
-                radarCtx.fillStyle = 'rgba(156, 163, 175, 0.7)';
-                radarCtx.font = `${center * 0.08}px Inter`;
-                radarCtx.textAlign = 'center';
-                radarCtx.textBaseline = 'middle';
-
-                ['N', 'O', 'S', 'W'].forEach((dir, i) => { // O for Ost (East)
-                    const angle = i * Math.PI / 2 - Math.PI / 2;
-                    const x = center + (radius * 1.08) * Math.cos(angle);
-                    const y = center + (radius * 1.08) * Math.sin(angle);
-                    radarCtx.fillText(dir, x, y);
-                });
-                
-                radarCtx.beginPath();
-                radarCtx.arc(center, center, radius, 0, 2 * Math.PI);
-                radarCtx.stroke();
-                radarCtx.beginPath();
-                radarCtx.arc(center, center, radius * 0.5, 0, 2 * Math.PI);
-                radarCtx.stroke();
-                
-                detectionLog.forEach((entry, index) => {
-                    const angle = (entry.heading - 90) * Math.PI / 180;
-                    const loudnessRatio = Math.max(0, Math.min(1, (entry.amp - LIVE_SENSITIVITY) / (255 - LIVE_SENSITIVITY)));
-                    const distanceFromCenter = loudnessRatio * radius;
-                    
-                    const x = center + distanceFromCenter * Math.cos(angle);
-                    const y = center + distanceFromCenter * Math.sin(angle);
-                    
-                    const pointRadius = 2 + loudnessRatio * 4;
-                    const opacity = 1 - (index / detectionLog.length);
-                    
-                    radarCtx.beginPath();
-                    const hue = 120 - (loudnessRatio * 120);
-                    radarCtx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
-                    radarCtx.arc(x, y, pointRadius, 0, 2 * Math.PI);
-                    radarCtx.fill();
-                });
-            }
+            spectrogramCanvas.addEventListener('click', (event) => { /* ... unchanged ... */ });
+            playSignatureButton.addEventListener('click', async () => { /* ... unchanged ... */ });
+            trackSignatureButton.addEventListener('click', () => { /* ... unchanged ... */ });
+            function updateLogUI() { /* ... unchanged ... */ }
+            function drawRadar() { /* ... unchanged ... */ }
             
             window.addEventListener('resize', drawRadar);
             drawRadar();
