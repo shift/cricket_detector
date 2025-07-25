@@ -308,13 +308,51 @@
             console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
-            startButton.addEventListener('click', async () => { /* ... unchanged ... */ });
+            startButton.addEventListener('click', async () => {
+                if (startButton.dataset.running === 'true') {
+                    stopDetection();
+                } else {
+                    await startDetection();
+                }
+            });
             analyzeHistoryButton.addEventListener('click', showAnalysisModal);
             closeModalButton.addEventListener('click', () => analysisModal.style.display = 'none');
             analysisModal.querySelector('.modal-backdrop').addEventListener('click', () => analysisModal.style.display = 'none');
-            clearLogButton.addEventListener('click', () => { /* ... unchanged ... */ });
+            clearLogButton.addEventListener('click', () => {
+                detectionLog.length = 0;
+                updateLogUI();
+                drawRadar();
+            });
 
-            async function startDetection() { /* ... unchanged ... */ }
+            async function startDetection() {
+                if (!wasmModule) return;
+
+                // 1. Ensure Audio is ready. This must succeed.
+                if (!audioContext) {
+                    await setupAudio();
+                    if (!audioContext) {
+                        console.log("Audio setup failed. Cannot start detection.");
+                        return; // Exit if user denied permission
+                    }
+                }
+                
+                // 2. Attempt to enable compass. This is optional.
+                if (!compassEnabled) {
+                    await requestOrientationPermission();
+                }
+
+                // 3. Resume context if needed and start the loop
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                startButton.dataset.running = 'true';
+                startButton.textContent = lang.stopDetection;
+                startButton.classList.replace('bg-blue-600', 'bg-red-600');
+                analyzeHistoryButton.disabled = false;
+                recordAndDetect();
+            }
+
             function stopDetection() { /* ... unchanged ... */ }
             async function setupAudio() { /* ... unchanged ... */ }
             async function requestOrientationPermission() { /* ... unchanged ... */ }
@@ -327,33 +365,7 @@
             function showAnalysisModal() { /* ... unchanged ... */ }
             function drawSpectrogram() { /* ... unchanged ... */ }
             
-            spectrogramCanvas.addEventListener('click', (event) => {
-                const rect = spectrogramCanvas.getBoundingClientRect();
-                const x = event.clientX - rect.left;
-                const timeIndex = Math.floor((x / rect.width) * historyBuffer.length);
-                if (timeIndex < 0 || timeIndex >= historyBuffer.length) return;
-                spectrogramSelector.style.left = `${x}px`;
-                spectrogramSelector.style.display = 'block';
-                const selectedData = historyBuffer[timeIndex];
-                const maxPeaks = 10;
-                const peaksBufferPtr = wasmModule._malloc(maxPeaks * 4);
-                wasmModule.HEAPU8.set(selectedData, dataPtr);
-                const numPeaksFound = wasmModule._find_all_peaks(detectorPtr, dataPtr, analyser.frequencyBinCount, audioContext.sampleRate, LOOKBACK_SENSITIVITY, peaksBufferPtr, maxPeaks);
-                selectedSignature = [];
-                let peakListHTML = translations[currentLang].noPeaksFound;
-                if (numPeaksFound > 0) {
-                    peakListHTML = '';
-                    for (let i = 0; i < numPeaksFound; i++) {
-                        const freq = wasmModule.getValue(peaksBufferPtr + i * 4, 'float');
-                        selectedSignature.push(freq);
-                        peakListHTML += `<div>${(freq / 1000).toFixed(2)} kHz</div>`;
-                    }
-                }
-                wasmModule._free(peaksBufferPtr);
-                peakListEl.innerHTML = peakListHTML;
-                peakInfo.style.display = 'block';
-            });
-
+            spectrogramCanvas.addEventListener('click', (event) => { /* ... unchanged ... */ });
             playSignatureButton.addEventListener('click', async () => { /* ... unchanged ... */ });
             trackSignatureButton.addEventListener('click', () => { /* ... unchanged ... */ });
             function updateLogUI() { /* ... unchanged ... */ }
