@@ -186,14 +186,12 @@
                 document.querySelectorAll('[data-lang-key]').forEach(el => {
                     const key = el.dataset.langKey;
                     if (lang[key]) {
-                        if (el.tagName === 'LABEL') {
-                            const valueSpan = el.querySelector('span');
-                            const baseText = lang[key];
-                            if (valueSpan) {
-                                el.innerHTML = `${baseText} <span>${valueSpan.innerHTML}</span>`;
-                            } else {
-                                el.textContent = baseText;
-                            }
+                        // FIX: Non-destructive update for labels with value spans
+                        if (el.tagName === 'LABEL' && el.querySelector('span')) {
+                             const textNode = Array.from(el.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+                             if(textNode) {
+                                 textNode.nodeValue = lang[key] + ' ';
+                             }
                         } else {
                              el.textContent = lang[key];
                         }
