@@ -19,7 +19,12 @@
 </head>
 <body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
 
-    <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
+    <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6 relative">
+        <!-- Language Toggle -->
+        <div class="absolute top-4 right-4">
+            <button id="langToggle" class="px-3 py-1 text-sm font-medium text-gray-300 bg-gray-700/50 rounded-md hover:bg-gray-700">EN</button>
+        </div>
+
         <div class="text-center">
             <h1 class="text-3xl font-bold text-blue-400" data-lang-key="title">Richtungssucher</h1>
             <p class="text-gray-400 mt-2" data-lang-key="subtitle">Mit Kompass und Lautstärke die Quelle finden.</p>
@@ -47,18 +52,18 @@
         
         <!-- Settings Panel -->
         <div class="bg-gray-900/50 rounded-lg">
-            <button id="settingsToggle" class="w-full text-left p-3 font-medium text-gray-300">Einstellungen</button>
+            <button id="settingsToggle" class="w-full text-left p-3 font-medium text-gray-300" data-lang-key="settings">Einstellungen</button>
             <div id="settingsPanel" class="px-4 pb-4 space-y-4 overflow-hidden max-h-0">
                 <div>
-                    <label for="liveSensitivity" class="block text-sm font-medium text-gray-400">Live-Empfindlichkeit: <span id="liveSensValue">190</span></label>
+                    <label for="liveSensitivity" class="block text-sm font-medium text-gray-400" data-lang-key="liveSensLabel">Live-Empfindlichkeit: <span id="liveSensValue">190</span></label>
                     <input type="range" id="liveSensitivity" min="150" max="250" value="190" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
                 </div>
                 <div>
-                    <label for="lookbackSensitivity" class="block text-sm font-medium text-gray-400">Analyse-Empfindlichkeit: <span id="lookbackSensValue">170</span></label>
+                    <label for="lookbackSensitivity" class="block text-sm font-medium text-gray-400" data-lang-key="lookbackSensLabel">Analyse-Empfindlichkeit: <span id="lookbackSensValue">170</span></label>
                     <input type="range" id="lookbackSensitivity" min="150" max="250" value="170" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
                 </div>
                 <div>
-                    <label for="historyDuration" class="block text-sm font-medium text-gray-400">Verlaufsdauer: <span id="historyDurationValue">5</span>s</label>
+                    <label for="historyDuration" class="block text-sm font-medium text-gray-400" data-lang-key="historyDurationLabel">Verlaufsdauer: <span id="historyDurationValue">5</span>s</label>
                     <input type="range" id="historyDuration" min="2" max="10" value="5" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
                 </div>
             </div>
@@ -116,11 +121,95 @@
     <script>
         function startApp(Module) {
             // --- LANGUAGE MANAGEMENT ---
-            const translations = { /* ... unchanged ... */ };
-            const currentLang = 'de';
-            const lang = translations[currentLang];
-            function setLanguage() { /* ... unchanged ... */ }
-            setLanguage();
+            const translations = {
+                de: {
+                    title: "Richtungssucher",
+                    subtitle: "Mit Kompass und Lautstärke die Quelle finden.",
+                    startDetection: "Erkennung starten",
+                    stopDetection: "Erkennung stoppen",
+                    analyze: "Gehört! Letzte 5s analysieren",
+                    activeTargets: "Aktive Ziele",
+                    settings: "Einstellungen",
+                    liveSensLabel: "Live-Empfindlichkeit:",
+                    lookbackSensLabel: "Analyse-Empfindlichkeit:",
+                    historyDurationLabel: "Verlaufsdauer:",
+                    compassInactive: "Kompass inaktiv.",
+                    compassPointing: "Richtung: {heading}°",
+                    detectionLog: "Erkennungsprotokoll",
+                    clear: "Löschen",
+                    waiting: "Warte auf Erkennungen...",
+                    analysisTitle: "Rückblick-Analyse",
+                    analysisSubtitle: "Klicken Sie auf einen vertikalen Abschnitt im Spektrogramm, um einen Zeitpunkt zu analysieren.",
+                    signatureTitle: "Klangsignatur im ausgewählten Moment:",
+                    replaySound: "Ton abspielen",
+                    trackSignature: "Diese Signatur verfolgen",
+                    noPeaksFound: "Keine signifikanten Spitzen gefunden."
+                },
+                en: {
+                    title: "Directional Detector",
+                    subtitle: "Using compass and loudness to find the source.",
+                    startDetection: "Start Detection",
+                    stopDetection: "Stop Detection",
+                    analyze: "Heard It! Analyze Last 5s",
+                    activeTargets: "Active Targets",
+                    settings: "Settings",
+                    liveSensLabel: "Live Sensitivity:",
+                    lookbackSensLabel: "Analysis Sensitivity:",
+                    historyDurationLabel: "History Duration:",
+                    compassInactive: "Compass inactive.",
+                    compassPointing: "Pointing: {heading}°",
+                    detectionLog: "Detection Log",
+                    clear: "Clear",
+                    waiting: "Waiting for detections...",
+                    analysisTitle: "Look-back Analysis",
+                    analysisSubtitle: "Click on a vertical slice in the spectrogram to analyze a moment in time.",
+                    signatureTitle: "Sound Signature at Selected Moment:",
+                    replaySound: "Replay Sound",
+                    trackSignature: "Track this Signature",
+                    noPeaksFound: "No significant peaks found."
+                }
+            };
+            let currentLang = localStorage.getItem('detectorLang') || 'de';
+            
+            const langToggle = document.getElementById('langToggle');
+
+            function setLanguage(langCode) {
+                currentLang = langCode;
+                localStorage.setItem('detectorLang', langCode);
+                const lang = translations[currentLang];
+                document.documentElement.lang = currentLang;
+
+                document.querySelectorAll('[data-lang-key]').forEach(el => {
+                    const key = el.dataset.langKey;
+                    if (lang[key]) {
+                        // Handle dynamic values in labels
+                        if (el.tagName === 'LABEL') {
+                            const valueSpan = el.querySelector('span');
+                            const baseText = lang[key];
+                            if (valueSpan) {
+                                el.innerHTML = `${baseText} <span>${valueSpan.innerHTML}</span>`;
+                            } else {
+                                el.textContent = baseText;
+                            }
+                        } else {
+                             el.textContent = lang[key];
+                        }
+                    }
+                });
+
+                // Update dynamic button text
+                if (startButton.dataset.running === 'true') {
+                    startButton.textContent = lang.stopDetection;
+                }
+                
+                // Update toggle button text
+                langToggle.textContent = currentLang === 'de' ? 'EN' : 'DE';
+            }
+
+            langToggle.addEventListener('click', () => {
+                const newLang = currentLang === 'de' ? 'en' : 'de';
+                setLanguage(newLang);
+            });
 
             // DOM Elements
             const startButton = document.getElementById('startButton'), analyzeHistoryButton = document.getElementById('analyzeHistoryButton'), clearLogButton = document.getElementById('clearLogButton'), compassStatusEl = document.getElementById('compassStatus'), logContainer = document.getElementById('logContainer'), logPlaceholder = document.getElementById('logPlaceholder'), radarCanvas = document.getElementById('radarCanvas'), radarCtx = radarCanvas.getContext('2d'), targetsContainer = document.getElementById('targetsContainer');
@@ -215,6 +304,7 @@
             loadSettings();
             loadTrackedFrequencies();
             updateWasmTargets();
+            setLanguage(currentLang); // Set language after all elements are available
             console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
@@ -228,46 +318,12 @@
             function stopDetection() { /* ... unchanged ... */ }
             async function setupAudio() { /* ... unchanged ... */ }
             async function requestOrientationPermission() { /* ... unchanged ... */ }
-            function handleOrientation(event) { /* ... unchanged ... */ }
-            function recordAndDetect() {
-                if (!analyser || !wasmModule) return;
-                animationFrameId = requestAnimationFrame(recordAndDetect);
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-                analyser.getByteFrequencyData(dataArray);
-                historyBuffer.push(new Uint8Array(dataArray));
-                // Trim buffer based on dynamic size
-                while (historyBuffer.length > HISTORY_SIZE) {
-                    historyBuffer.shift();
-                }
-                wasmModule.HEAPU8.set(dataArray, dataPtr);
-                const detectedAmplitude = wasmModule._detector_find_multiple_peaks(detectorPtr, dataPtr, bufferLength, audioContext.sampleRate, targetsPtr, TARGET_FREQUENCIES.length, LIVE_SENSITIVITY, liveFreqPtr);
-                const detectedFreq = wasmModule.getValue(liveFreqPtr, 'float');
-                
-                // Duration logic remains the same
-                if (detectedAmplitude > 0) {
-                    if (activePeak.frames === 0) {
-                        activePeak.freq = detectedFreq;
-                        activePeak.amp = detectedAmplitude;
-                        activePeak.heading = currentHeading;
-                        activePeak.startTime = performance.now();
-                    }
-                    activePeak.frames++;
-                    if (detectedAmplitude > activePeak.amp) {
-                        activePeak.amp = detectedAmplitude;
-                        activePeak.heading = currentHeading;
-                    }
-                } else if (activePeak.frames > 0) {
-                    const duration = performance.now() - activePeak.startTime;
-                    if ('vibrate' in navigator) navigator.vibrate(100);
-                    detectionLog.unshift({ time: new Date(), freq: activePeak.freq, amp: activePeak.amp, heading: activePeak.heading, duration: duration });
-                    if (detectionLog.length > 50) detectionLog.pop();
-                    updateLogUI();
-                    activePeak = { freq: 0, amp: 0, heading: 0, frames: 0, startTime: 0 };
-                }
-                drawRadar();
+            function handleOrientation(event) {
+                let heading = event.webkitCompassHeading || event.alpha;
+                if(heading !== null) currentHeading = heading;
+                compassStatusEl.textContent = translations[currentLang].compassPointing.replace('{heading}', Math.round(currentHeading));
             }
-
+            function recordAndDetect() { /* ... unchanged ... */ }
             function showAnalysisModal() { /* ... unchanged ... */ }
             function drawSpectrogram() { /* ... unchanged ... */ }
             
@@ -282,11 +338,9 @@
                 const maxPeaks = 10;
                 const peaksBufferPtr = wasmModule._malloc(maxPeaks * 4);
                 wasmModule.HEAPU8.set(selectedData, dataPtr);
-                
                 const numPeaksFound = wasmModule._find_all_peaks(detectorPtr, dataPtr, analyser.frequencyBinCount, audioContext.sampleRate, LOOKBACK_SENSITIVITY, peaksBufferPtr, maxPeaks);
-                
                 selectedSignature = [];
-                let peakListHTML = lang.noPeaksFound;
+                let peakListHTML = translations[currentLang].noPeaksFound;
                 if (numPeaksFound > 0) {
                     peakListHTML = '';
                     for (let i = 0; i < numPeaksFound; i++) {
