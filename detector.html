@@ -288,17 +288,107 @@
             console.log("WASM module initialized and app started.");
 
             // --- Control Logic ---
-            startButton.addEventListener('click', async () => { /* ... unchanged ... */ });
+            startButton.addEventListener('click', async () => {
+                if (startButton.dataset.running === 'true') {
+                    stopDetection();
+                } else {
+                    await startDetection();
+                }
+            });
             analyzeHistoryButton.addEventListener('click', showAnalysisModal);
             closeModalButton.addEventListener('click', () => analysisModal.style.display = 'none');
             analysisModal.querySelector('.modal-backdrop').addEventListener('click', () => analysisModal.style.display = 'none');
-            clearLogButton.addEventListener('click', () => { /* ... unchanged ... */ });
+            clearLogButton.addEventListener('click', () => {
+                detectionLog.length = 0;
+                updateLogUI();
+                drawRadar();
+            });
 
-            async function startDetection() { /* ... unchanged ... */ }
-            function stopDetection() { /* ... unchanged ... */ }
-            async function setupAudio() { /* ... unchanged ... */ }
-            async function requestOrientationPermission() { /* ... unchanged ... */ }
-            function handleOrientation(event) { /* ... unchanged ... */ }
+            async function startDetection() {
+                if (!wasmModule) return;
+
+                // FIX: Check for closed audio context and force re-initialization
+                if (audioContext && audioContext.state === 'closed') {
+                    audioContext = null; 
+                }
+
+                if (!audioContext) {
+                    const audioReady = await setupAudio();
+                    if (!audioReady) {
+                        console.log("Audio setup failed. Cannot start detection.");
+                        return;
+                    }
+                }
+                
+                if (!compassEnabled) {
+                    await requestOrientationPermission();
+                }
+
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                startButton.dataset.running = 'true';
+                startButton.textContent = translations[currentLang].stopDetection;
+                startButton.classList.replace('bg-blue-600', 'bg-red-600');
+                analyzeHistoryButton.disabled = false;
+                recordAndDetect();
+            }
+
+            function stopDetection() {
+                if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+                if (audioContext) audioContext.suspend();
+                startButton.dataset.running = 'false';
+                startButton.textContent = translations[currentLang].startDetection;
+                startButton.classList.replace('bg-red-600', 'bg-blue-600');
+                analyzeHistoryButton.disabled = true;
+            }
+            
+            async function setupAudio() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = bufferSize;
+                    analyser.smoothingTimeConstant = 0.1;
+                    const source = audioContext.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                    return true; // Indicate success
+                } catch (err) {
+                    console.error("Mic Error:", err);
+                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                        compassStatusEl.textContent = translations[currentLang].micPermission;
+                    } else {
+                        compassStatusEl.textContent = translations[currentLang].micError;
+                    }
+                    audioContext = null; // Ensure we try again next time
+                    return false; // Indicate failure
+                }
+            }
+
+            async function requestOrientationPermission() {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    try {
+                        const permissionState = await DeviceOrientationEvent.requestPermission();
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                            compassEnabled = true;
+                        }
+                    } catch (error) {
+                        console.error("Compass permission denied:", error);
+                    }
+                } else if ('ondeviceorientation' in window) {
+                    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+                    window.addEventListener('deviceorientation', handleOrientation, true);
+                    compassEnabled = true;
+                }
+            }
+            function handleOrientation(event) {
+                let heading = event.webkitCompassHeading || event.alpha;
+                if(heading !== null) currentHeading = heading;
+                compassStatusEl.textContent = translations[currentLang].compassPointing.replace('{heading}', Math.round(currentHeading));
+            }
             function recordAndDetect() { /* ... unchanged ... */ }
             function showAnalysisModal() { /* ... unchanged ... */ }
             function drawSpectrogram() { /* ... unchanged ... */ }
